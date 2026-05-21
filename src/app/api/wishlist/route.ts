@@ -7,12 +7,23 @@ export const dynamic = "force-dynamic";
 const RETRY_LIMIT = 3;
 const RETRY_INTERVAL_MS = 500;
 
+const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept": "application/json, text/javascript, */*; q=0.01",
+  "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+  "Referer": "https://store.steampowered.com/",
+};
+
 async function fetchWithRetry(
   url: string,
-  retries = RETRY_LIMIT
+  retries = RETRY_LIMIT,
+  headers?: Record<string, string>
 ): Promise<Response> {
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const res = await fetch(url, { next: { revalidate: 0 } });
+    const res = await fetch(url, {
+      headers,
+      next: { revalidate: 0 },
+    });
     if (res.status === 429 && attempt < retries) {
       await new Promise((r) => setTimeout(r, RETRY_INTERVAL_MS));
       continue;
@@ -29,7 +40,7 @@ async function fetchAllWishlistAppIds(steamId: string): Promise<number[]> {
   while (true) {
     const url = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${page}`;
     console.log(`[WishScore] Fetching wishlist page ${page}: ${url}`);
-    const res = await fetchWithRetry(url);
+    const res = await fetchWithRetry(url, RETRY_LIMIT, BROWSER_HEADERS);
 
     const contentType = res.headers.get("content-type") ?? "";
     console.log(`[WishScore] Page ${page}: status=${res.status}, content-type=${contentType}`);
