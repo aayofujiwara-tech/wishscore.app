@@ -4,11 +4,9 @@ import { useMemo, useState } from "react";
 import type { GameResult, ApiResponse } from "@/lib/types";
 
 function scoreColor(score: number): string {
-  if (score >= 100) return "#22c55e";
-  if (score >= 50) return "#86efac";
-  if (score >= 20) return "#facc15";
-  if (score >= 5) return "#f97316";
-  return "#ef4444";
+  if (score >= 10) return "#4ade80";
+  if (score >= 5) return "#fb923c";
+  return "#94a3b8";
 }
 
 function rankBadge(rank: number) {
@@ -56,7 +54,7 @@ function GameCard({
       <div className="w-1 flex-shrink-0" style={{ background: color }} />
 
       {/* Thumbnail */}
-      <div className="w-24 h-16 flex-shrink-0 overflow-hidden my-3 rounded">
+      <div className="w-20 sm:w-24 h-16 flex-shrink-0 overflow-hidden my-3 rounded">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={game.headerImage}
@@ -66,7 +64,7 @@ function GameCard({
       </div>
 
       {/* Info */}
-      <div className="flex-1 min-w-0 py-3 pr-3">
+      <div className="flex-1 min-w-0 py-2 sm:py-3 pr-2 sm:pr-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {badge && (
@@ -81,12 +79,12 @@ function GameCard({
               {game.name}
             </span>
           </div>
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             {game.discountPercent > 0 && (
-              <span className="text-xs">🔥</span>
+              <span className="text-lg sm:text-xl">🔥</span>
             )}
             <span
-              className="font-rajdhani font-bold text-sm"
+              className="font-rajdhani font-bold text-2xl sm:text-3xl"
               style={{ color }}
             >
               {score.toFixed(1)}
@@ -117,7 +115,7 @@ function GameCard({
 
           {game.reviewTotal > 0 && (
             <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              <div className="flex-1 bg-[#2a475e] rounded-full h-1.5 min-w-0 max-w-[80px]">
+              <div className="flex-1 bg-[#2a475e] rounded-full h-1.5 min-w-0 max-w-[50px] sm:max-w-[80px]">
                 <div
                   className="h-1.5 rounded-full"
                   style={{
@@ -154,7 +152,7 @@ function WeightSlider({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="text-sm text-[#8ba3b5] w-40 flex-shrink-0">{label}</span>
+      <span className="text-xs sm:text-sm text-[#8ba3b5] w-24 sm:w-40 flex-shrink-0">{label}</span>
       <input
         type="range"
         min={min}
@@ -221,8 +219,8 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="text-center py-10 px-4">
-        <h1 className="font-rajdhani font-bold text-5xl text-[#1b9aff] tracking-widest">
+      <header className="text-center py-8 sm:py-10 px-4">
+        <h1 className="font-rajdhani font-bold text-4xl sm:text-5xl text-[#1b9aff] tracking-widest">
           WishScore
         </h1>
         <p className="text-[#8ba3b5] mt-2 text-sm tracking-wide">
@@ -230,22 +228,22 @@ export default function Home() {
         </p>
       </header>
 
-      <main className="flex-1 max-w-2xl mx-auto w-full px-4 pb-12">
+      <main className="flex-1 max-w-2xl mx-auto w-full px-3 sm:px-4 pb-12">
         {/* Input area */}
         <div className="rounded-xl border border-[#2a475e] bg-[#16202d] p-5 mb-4">
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               placeholder="SteamID64 or Profile URL"
               value={steamId}
               onChange={(e) => setSteamId(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
-              className="flex-1 bg-[#1b2838] border border-[#2a475e] rounded-lg px-4 py-2.5 text-sm text-[#c7d5e0] placeholder-[#4a6b7c] focus:outline-none focus:border-[#1b9aff] transition-colors"
+              className="flex-1 bg-[#1b2838] border border-[#2a475e] rounded-lg px-4 py-3 text-sm text-[#c7d5e0] placeholder-[#4a6b7c] focus:outline-none focus:border-[#1b9aff] transition-colors"
             />
             <button
               onClick={handleAnalyze}
               disabled={loading || !steamId.trim()}
-              className="bg-[#1b9aff] hover:bg-[#1580d9] disabled:opacity-50 disabled:cursor-not-allowed text-white font-rajdhani font-semibold px-5 py-2.5 rounded-lg transition-colors text-sm"
+              className="w-full sm:w-auto bg-[#1b9aff] hover:bg-[#1580d9] disabled:opacity-50 disabled:cursor-not-allowed text-white font-rajdhani font-semibold px-6 py-3 rounded-lg transition-colors text-sm"
             >
               {loading ? "..." : "分析"}
             </button>
@@ -404,7 +402,7 @@ export default function Home() {
                       className="flex gap-3 rounded-lg overflow-hidden border border-[#2a475e] bg-[#16202d] hover:border-[#22c55e] transition-all duration-200 cursor-pointer"
                     >
                       <div className="w-1 bg-[#22c55e] flex-shrink-0" />
-                      <div className="w-24 h-16 flex-shrink-0 overflow-hidden my-3 rounded">
+                      <div className="w-20 sm:w-24 h-16 flex-shrink-0 overflow-hidden my-3 rounded">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={game.headerImage} alt={game.name} className="w-full h-full object-cover" />
                       </div>
@@ -441,7 +439,7 @@ export default function Home() {
                       className="flex gap-3 rounded-lg overflow-hidden border border-[#2a475e] bg-[#16202d] hover:border-[#8ba3b5] transition-all duration-200 cursor-pointer"
                     >
                       <div className="w-1 bg-[#4a6b7c] flex-shrink-0" />
-                      <div className="w-24 h-16 flex-shrink-0 overflow-hidden my-3 rounded">
+                      <div className="w-20 sm:w-24 h-16 flex-shrink-0 overflow-hidden my-3 rounded">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={game.headerImage} alt={game.name} className="w-full h-full object-cover" />
                       </div>
