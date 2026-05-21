@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameResult, ApiResponse } from "@/lib/types";
 
 function scoreColor(score: number): string {
@@ -39,12 +39,14 @@ function GameCard({
   rank,
   weights,
   favoriteTags,
+  steamid,
   style,
 }: {
   game: GameResult;
   rank: number;
   weights: { discount: number; review: number; price: number };
   favoriteTags: string[];
+  steamid: string;
   style?: React.CSSProperties;
 }) {
   const score = recomputeScore(game, weights, favoriteTags);
@@ -53,15 +55,51 @@ function GameCard({
   const matchCount = favoriteTags.length > 0
     ? game.tags.filter((t) => favoriteTags.includes(t)).length
     : 0;
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function buildShareUrl(): string {
+    const origin = window.location.origin;
+    const sp = new URLSearchParams({
+      rank: String(rank),
+      name: game.name,
+      score: score.toFixed(1),
+      price: `¥${game.priceJPY.toLocaleString()}`,
+      discount: String(game.discountPercent),
+      positive: String(Math.round(game.positiveRate * 100)),
+      image: game.headerImage,
+    });
+    return `${origin}/share/${encodeURIComponent(steamid)}?${sp.toString()}`;
+  }
+
+  function handleShare(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const shareUrl = buildShareUrl();
+    const text = `私のウィッシュリスト${rank}位は「${game.name}」！コスパスコア${score.toFixed(1)}🔥 #WishScore`;
+    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`;
+    window.open(tweetUrl, "_blank", "noopener,noreferrer");
+  }
+
+  function handleCopy(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const shareUrl = buildShareUrl();
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
   return (
-    <a
-      href={`https://store.steampowered.com/app/${game.appid}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex gap-3 rounded-lg overflow-hidden border border-[#2a475e] bg-[#16202d] hover:border-[#1b9aff] hover:bg-[#1a2535] transition-all duration-200 cursor-pointer animate-fade-in-down"
-      style={style}
-    >
+    <div className="relative animate-fade-in-down" style={style}>
+      <a
+        href={`https://store.steampowered.com/app/${game.appid}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex gap-3 rounded-lg overflow-hidden border border-[#2a475e] bg-[#16202d] hover:border-[#1b9aff] hover:bg-[#1a2535] transition-all duration-200 cursor-pointer"
+      >
       {/* Score color bar */}
       <div className="w-1 flex-shrink-0" style={{ background: color }} />
 
@@ -175,7 +213,26 @@ function GameCard({
           </div>
         )}
       </div>
-    </a>
+      </a>
+
+      {/* Share buttons */}
+      <div className="absolute top-2 right-2 flex gap-1">
+        <button
+          onClick={handleShare}
+          title="X(Twitter)でシェア"
+          className="text-xs px-2 py-1 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] transition-colors"
+        >
+          𝕏
+        </button>
+        <button
+          onClick={handleCopy}
+          title="URLをコピー"
+          className="text-xs px-2 py-1 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] transition-colors"
+        >
+          {copied ? "✓" : "📋"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -528,6 +585,7 @@ export default function Home() {
                     rank={i + 1}
                     weights={weights}
                     favoriteTags={favoriteTags}
+                    steamid={steamId}
                     style={{ animationDelay: `${i * 50}ms`, opacity: 0 }}
                   />
                 ))}
