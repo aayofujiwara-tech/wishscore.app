@@ -1,29 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveToSteamId64 } from "@/lib/steamUtils";
+import type { GameResult, ApiResponse } from "@/lib/types";
 
-export type GameResult = {
-  appid: number;
-  name: string;
-  headerImage: string;
-  priceJPY: number;
-  originalPriceJPY: number;
-  discountPercent: number;
-  positiveRate: number;
-  reviewTotal: number;
-  score: number;
-  isFree: boolean;
-  isUnreleased: boolean;
-  shortDescription: string;
-  genres: string[];
-};
-
-export type ApiResponse = {
-  games: GameResult[];
-  totalCount: number;
-  freeGames: GameResult[];
-  unreleasedGames: GameResult[];
-  error?: string;
-};
+export type { GameResult, ApiResponse };
 
 const RETRY_LIMIT = 3;
 const RETRY_INTERVAL_MS = 500;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { GameResult, ApiResponse } from "@/app/api/wishlist/route";
+import type { GameResult, ApiResponse } from "@/lib/types";
 
 function scoreColor(score: number): string {
   if (score >= 100) return "#22c55e";
