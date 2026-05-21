@@ -130,6 +130,16 @@ function GameCard({
             </div>
           )}
         </div>
+
+        {game.hltbMainStory && (
+          <div className="flex items-center gap-1.5 mt-1 text-xs text-[#4a6b7c]">
+            <span>🕐</span>
+            <span>約{game.hltbMainStory}時間</span>
+            {game.pricePerHour !== null && (
+              <span>/ ¥{game.pricePerHour.toLocaleString()}/時間</span>
+            )}
+          </div>
+        )}
       </div>
     </a>
   );
