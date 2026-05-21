@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveToSteamId64 } from "@/lib/steamUtils";
 import type { GameResult, ApiResponse } from "@/lib/types";
 
-export type { GameResult, ApiResponse };
+export const dynamic = "force-dynamic";
 
 const RETRY_LIMIT = 3;
 const RETRY_INTERVAL_MS = 500;
