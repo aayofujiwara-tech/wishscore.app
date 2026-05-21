@@ -9,14 +9,8 @@ export const maxDuration = 60;
 
 const RETRY_LIMIT = 3;
 const RETRY_INTERVAL_MS = 500;
-const ANALYZE_LIMIT = 20;
-
-const BROWSER_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Accept": "application/json, text/javascript, */*; q=0.01",
-  "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-  "Referer": "https://store.steampowered.com/",
-};
+const DETAIL_LIMIT = 20;
+const BATCH_SIZE = 10;
 
 async function fetchWithRetry(
   url: string,
@@ -116,6 +110,47 @@ function calculateScore(
   return (positiveRate * reviewWeight * discountBoost / priceJPY) * 1000 * hltbBonus;
 }
 
+// Step 1: fast scan — appdetails + reviews only, no HLTB, no SteamSpy
+async function processGameFast(appid: number): Promise<GameResult | null> {
+  const [details, reviews] = await Promise.all([
+    fetchAppDetails(appid),
+    fetchReviews(appid),
+  ]);
+
+  if (!details?.success || !details.data) return null;
+
+  const d = details.data;
+  const isFree = d.is_free ?? false;
+  const isUnreleased = d.release_date?.coming_soon ?? false;
+  const name = d.name ?? `App ${appid}`;
+  const headerImage =
+    d.header_image ?? `https://cdn.akamai.steamstatic.com/steam/apps/${appid}/header.jpg`;
+  const shortDescription = d.short_description ?? "";
+  const genres = (d.genres ?? []).map((g) => g.description);
+
+  const priceOverview = d.price_overview;
+  const priceJPY = priceOverview ? (priceOverview.final ?? 0) / 100 : 0;
+  const originalPriceJPY = priceOverview ? (priceOverview.initial ?? 0) / 100 : 0;
+  const discountPercent = priceOverview?.discount_percent ?? 0;
+
+  const { positive, negative, total } = reviews;
+  const positiveRate = total > 0 ? positive / (positive + negative) : 0;
+
+  let score = 0;
+  if (!isFree && !isUnreleased && priceJPY > 0) {
+    score = calculateScore(positiveRate, total, discountPercent, priceJPY);
+  }
+
+  return {
+    appid, name, headerImage, priceJPY, originalPriceJPY, discountPercent,
+    positiveRate, reviewTotal: total, score, isFree, isUnreleased,
+    shortDescription, genres,
+    hltbMainStory: null, hltbCompletionist: null, pricePerHour: null,
+    tags: [], tagMatchCount: 0,
+  };
+}
+
+// Step 2: full detail — appdetails + reviews + HLTB + SteamSpy
 async function processGame(appid: number, favoriteTags: string[]): Promise<GameResult | null> {
   const [details, reviews, tags] = await Promise.all([
     fetchAppDetails(appid),
@@ -190,13 +225,58 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       try {
         const { searchParams } = new URL(req.url);
-        const steamIdParam = searchParams.get("steamid") ?? "";
+        const mode = searchParams.get("mode") ?? "full";
         const favoriteTagsParam = searchParams.get("favoriteTags") ?? "";
         const favoriteTags = favoriteTagsParam
           ? favoriteTagsParam.split(",").map((t) => t.trim()).filter(Boolean)
           : [];
-        const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
 
+        // ── details mode: HLTB + SteamSpy for specific appids (load-more) ──
+        if (mode === "details") {
+          const appidsParam = searchParams.get("appids") ?? "";
+          const appids = appidsParam
+            .split(",")
+            .map(Number)
+            .filter((n) => n > 0)
+            .slice(0, DETAIL_LIMIT);
+
+          if (appids.length === 0) {
+            send({ type: "complete", games: [], freeGames: [], unreleasedGames: [] });
+            controller.close();
+            return;
+          }
+
+          send({ type: "progress", message: `詳細データを取得中...`, current: 0, total: appids.length });
+
+          const results: GameResult[] = [];
+          for (let i = 0; i < appids.length; i++) {
+            const game = await processGame(appids[i], favoriteTags);
+            if (game) {
+              results.push(game);
+              send({ type: "game", game, current: i + 1, total: appids.length });
+            } else {
+              send({ type: "progress", message: `詳細データを取得中...`, current: i + 1, total: appids.length });
+            }
+            if (i < appids.length - 1) {
+              await new Promise((r) => setTimeout(r, 300));
+            }
+          }
+
+          const paidGames = results
+            .filter((g) => !g.isFree && !g.isUnreleased)
+            .sort((a, b) => b.score - a.score);
+          const freeGames = results
+            .filter((g) => g.isFree)
+            .sort((a, b) => b.positiveRate - a.positiveRate);
+          const unreleasedGames = results.filter((g) => g.isUnreleased);
+
+          send({ type: "complete", games: paidGames, freeGames, unreleasedGames });
+          controller.close();
+          return;
+        }
+
+        // ── full mode: Step 1 (all games fast) + Step 2 (top 20 detailed) ──
+        const steamIdParam = searchParams.get("steamid") ?? "";
         if (!steamIdParam.trim()) {
           send({ type: "error", error: "INVALID_STEAMID" });
           controller.close();
@@ -239,56 +319,75 @@ export async function GET(req: NextRequest): Promise<Response> {
           return;
         }
 
-        const targets = allAppIds.slice(offset, offset + ANALYZE_LIMIT);
+        // Step 1: parallel batch fetch of appdetails + reviews for all games
+        const totalCount = allAppIds.length;
+        send({ type: "progress", message: `全${totalCount}件の基本情報を取得中...`, current: 0, total: totalCount });
 
-        if (targets.length === 0) {
-          send({ type: "complete", games: [], freeGames: [], unreleasedGames: [], totalCount: allAppIds.length, analyzedCount: offset, hasMore: false });
-          controller.close();
-          return;
+        const allScoredGames: GameResult[] = [];
+        for (let i = 0; i < allAppIds.length; i += BATCH_SIZE) {
+          const batch = allAppIds.slice(i, i + BATCH_SIZE);
+          const batchResults = await Promise.all(batch.map(processGameFast));
+          for (const g of batchResults) {
+            if (g) allScoredGames.push(g);
+          }
+          const done = Math.min(i + BATCH_SIZE, totalCount);
+          send({
+            type: "progress",
+            message: `全${totalCount}件の基本情報を取得中... (${done}/${totalCount})`,
+            current: done,
+            total: totalCount,
+          });
         }
 
-        const rangeLabel = offset === 0
-          ? `上位${targets.length}本`
-          : `${offset + 1}〜${offset + targets.length}件目`;
+        // Sort all games by base score descending
+        allScoredGames.sort((a, b) => b.score - a.score);
+
+        // Send all scored games to frontend for caching (enables load-more without re-scanning)
+        send({ type: "allScores", games: allScoredGames, totalCount });
+
+        // Step 2: full detail (HLTB + SteamSpy) for top DETAIL_LIMIT
+        const topGames = allScoredGames.slice(0, DETAIL_LIMIT);
         send({
           type: "progress",
-          message: `${allAppIds.length}本を取得。${rangeLabel}を分析中...`,
+          message: `上位${topGames.length}件の詳細データを取得中...`,
           current: 0,
-          total: targets.length,
+          total: topGames.length,
         });
 
-        const results: GameResult[] = [];
-
-        for (let i = 0; i < targets.length; i++) {
-          const appid = targets[i];
-          const game = await processGame(appid, favoriteTags);
+        const detailedResults: GameResult[] = [];
+        for (let i = 0; i < topGames.length; i++) {
+          const game = await processGame(topGames[i].appid, favoriteTags);
           if (game) {
-            results.push(game);
-            send({ type: "game", game, current: i + 1, total: targets.length });
+            detailedResults.push(game);
+            send({ type: "game", game, current: i + 1, total: topGames.length });
           } else {
-            send({ type: "progress", message: `分析中...`, current: i + 1, total: targets.length });
+            send({
+              type: "progress",
+              message: `上位${topGames.length}件の詳細データを取得中...`,
+              current: i + 1,
+              total: topGames.length,
+            });
           }
-          if (i < targets.length - 1) {
+          if (i < topGames.length - 1) {
             await new Promise((r) => setTimeout(r, 300));
           }
         }
 
-        const paidGames = results
+        const paidGames = detailedResults
           .filter((g) => !g.isFree && !g.isUnreleased)
           .sort((a, b) => b.score - a.score);
-        const freeGames = results
+        const freeGames = detailedResults
           .filter((g) => g.isFree)
           .sort((a, b) => b.positiveRate - a.positiveRate);
-        const unreleasedGames = results.filter((g) => g.isUnreleased);
+        const unreleasedGames = detailedResults.filter((g) => g.isUnreleased);
 
         send({
           type: "complete",
           games: paidGames,
           freeGames,
           unreleasedGames,
-          totalCount: allAppIds.length,
-          analyzedCount: offset + targets.length,
-          hasMore: offset + targets.length < allAppIds.length,
+          totalCount,
+          analyzedCount: topGames.length,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "SERVER_ERROR";
