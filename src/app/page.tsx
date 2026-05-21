@@ -18,29 +18,41 @@ function rankBadge(rank: number) {
 
 function recomputeScore(
   g: GameResult,
-  weights: { discount: number; review: number; price: number }
+  weights: { discount: number; review: number; price: number },
+  favoriteTags: string[]
 ): number {
   if (g.isFree || g.isUnreleased || g.priceJPY <= 0) return 0;
   const reviewWeight = Math.log10(g.reviewTotal + 1);
   const discountBoost = Math.pow(1 + g.discountPercent / 100, weights.discount);
   const priceFactor = Math.pow(g.priceJPY, weights.price);
-  return (g.positiveRate * reviewWeight * discountBoost * weights.review / priceFactor) * 1000;
+  const base = (g.positiveRate * reviewWeight * discountBoost * weights.review / priceFactor) * 1000;
+  const hltbBonus = g.pricePerHour ? Math.max(1.0, 20 / g.pricePerHour) : 1.0;
+  const matchCount = favoriteTags.length > 0
+    ? g.tags.filter((t) => favoriteTags.includes(t)).length
+    : 0;
+  const tagBonus = Math.min(2.0, 1 + matchCount * 0.2);
+  return base * hltbBonus * tagBonus;
 }
 
 function GameCard({
   game,
   rank,
   weights,
+  favoriteTags,
   style,
 }: {
   game: GameResult;
   rank: number;
   weights: { discount: number; review: number; price: number };
+  favoriteTags: string[];
   style?: React.CSSProperties;
 }) {
-  const score = recomputeScore(game, weights);
+  const score = recomputeScore(game, weights, favoriteTags);
   const badge = rankBadge(rank);
   const color = scoreColor(score);
+  const matchCount = favoriteTags.length > 0
+    ? game.tags.filter((t) => favoriteTags.includes(t)).length
+    : 0;
 
   return (
     <a
@@ -140,6 +152,28 @@ function GameCard({
             )}
           </div>
         )}
+
+        {game.tags.length > 0 && (
+          <div className="flex items-center gap-1 mt-1 flex-wrap">
+            {matchCount > 0 && (
+              <span className="text-xs font-bold text-[#1b9aff] mr-0.5">
+                🏷️ +{(matchCount * 20)}%
+              </span>
+            )}
+            {game.tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className={`text-xs px-1.5 py-0.5 rounded ${
+                  favoriteTags.includes(tag)
+                    ? "bg-[#1b9aff]/20 text-[#1b9aff] border border-[#1b9aff]/40"
+                    : "bg-[#2a475e]/50 text-[#4a6b7c]"
+                }`}
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </a>
   );
@@ -179,18 +213,30 @@ function WeightSlider({
   );
 }
 
+const PRESET_TAGS = [
+  "ローグライク", "RPG", "サバイバル", "アクション",
+  "シミュレーション", "パズル", "ホラー", "ADV",
+  "ストラテジー", "スポーツ",
+];
+
 export default function Home() {
   const [steamId, setSteamId] = useState("");
   const [savedId, setSavedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [weights, setWeights] = useState({ discount: 2.0, review: 1.0, price: 1.0 });
+  const [showWeights, setShowWeights] = useState(false);
+  const [favoriteTags, setFavoriteTags] = useState<string[]>([]);
+  const [showTagPanel, setShowTagPanel] = useState(false);
+  const [tagInput, setTagInput] = useState("");
 
   useEffect(() => {
-    const saved = localStorage.getItem("wishscore_steamid");
-    if (saved) {
-      setSteamId(saved);
-      setSavedId(saved);
+    const savedSteamId = localStorage.getItem("wishscore_steamid");
+    if (savedSteamId) { setSteamId(savedSteamId); setSavedId(savedSteamId); }
+    const savedTags = localStorage.getItem("wishscore_favorite_tags");
+    if (savedTags) {
+      try { setFavoriteTags(JSON.parse(savedTags) as string[]); } catch { /* ignore */ }
     }
   }, []);
 
@@ -199,19 +245,32 @@ export default function Home() {
     setSavedId(null);
     setSteamId("");
   }
-  const [weights, setWeights] = useState({
-    discount: 2.0,
-    review: 1.0,
-    price: 1.0,
-  });
-  const [showWeights, setShowWeights] = useState(false);
+
+  function toggleTag(tag: string) {
+    setFavoriteTags((prev) => {
+      const next = prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag];
+      localStorage.setItem("wishscore_favorite_tags", JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function addCustomTag() {
+    const tag = tagInput.trim();
+    if (!tag || favoriteTags.includes(tag)) { setTagInput(""); return; }
+    setFavoriteTags((prev) => {
+      const next = [...prev, tag];
+      localStorage.setItem("wishscore_favorite_tags", JSON.stringify(next));
+      return next;
+    });
+    setTagInput("");
+  }
 
   const rankedGames = useMemo(() => {
     if (!results) return [];
     return [...results.games]
-      .map((g) => ({ ...g, score: recomputeScore(g, weights) }))
+      .map((g) => ({ ...g, score: recomputeScore(g, weights, favoriteTags) }))
       .sort((a, b) => b.score - a.score);
-  }, [results, weights]);
+  }, [results, weights, favoriteTags]);
 
   async function handleAnalyze() {
     if (!steamId.trim()) return;
@@ -220,9 +279,9 @@ export default function Home() {
     setResults(null);
 
     try {
-      const res = await fetch(
-        `/api/wishlist?steamid=${encodeURIComponent(steamId.trim())}`
-      );
+      const params = new URLSearchParams({ steamid: steamId.trim() });
+      if (favoriteTags.length > 0) params.set("favoriteTags", favoriteTags.join(","));
+      const res = await fetch(`/api/wishlist?${params.toString()}`);
       const contentType = res.headers.get("content-type") ?? "";
       if (!contentType.includes("application/json")) {
         throw new Error(`API returned HTTP ${res.status}`);
@@ -381,30 +440,78 @@ export default function Home() {
                 <p className="text-xs text-[#8ba3b5] mb-2">
                   スライダーを動かすとリアルタイムに順位が変わります
                 </p>
-                <WeightSlider
-                  label="割引率の重み"
-                  value={weights.discount}
-                  min={1.0}
-                  max={3.0}
-                  step={0.1}
-                  onChange={(v) => setWeights((w) => ({ ...w, discount: v }))}
-                />
-                <WeightSlider
-                  label="レビュー件数の重み"
-                  value={weights.review}
-                  min={0.5}
-                  max={2.0}
-                  step={0.1}
-                  onChange={(v) => setWeights((w) => ({ ...w, review: v }))}
-                />
-                <WeightSlider
-                  label="価格の重み"
-                  value={weights.price}
-                  min={0.5}
-                  max={2.0}
-                  step={0.1}
-                  onChange={(v) => setWeights((w) => ({ ...w, price: v }))}
-                />
+                <WeightSlider label="割引率の重み" value={weights.discount} min={1.0} max={3.0} step={0.1} onChange={(v) => setWeights((w) => ({ ...w, discount: v }))} />
+                <WeightSlider label="レビュー件数の重み" value={weights.review} min={0.5} max={2.0} step={0.1} onChange={(v) => setWeights((w) => ({ ...w, review: v }))} />
+                <WeightSlider label="価格の重み" value={weights.price} min={0.5} max={2.0} step={0.1} onChange={(v) => setWeights((w) => ({ ...w, price: v }))} />
+              </div>
+            )}
+
+            {/* Tag panel toggle */}
+            <div className="flex justify-end mb-1">
+              <button
+                onClick={() => setShowTagPanel((v) => !v)}
+                className="text-xs text-[#1b9aff] hover:underline"
+              >
+                {showTagPanel ? "▲ タグ設定を閉じる" : "▼ 好みのタグを設定"}
+              </button>
+            </div>
+
+            {/* Tag panel */}
+            {showTagPanel && (
+              <div className="rounded-xl border border-[#2a475e] bg-[#16202d] p-5 mb-4">
+                <p className="text-sm font-medium text-[#c7d5e0] mb-1">🏷️ 好みのタグを設定</p>
+                <p className="text-xs text-[#4a6b7c] mb-3">一致したタグはスコアにボーナス（+20%/個）が加算されます</p>
+
+                <p className="text-xs text-[#8ba3b5] mb-2">よく使われるタグ：</p>
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {PRESET_TAGS.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => toggleTag(tag)}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                        favoriteTags.includes(tag)
+                          ? "bg-[#1b9aff] border-[#1b9aff] text-white"
+                          : "border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff]"
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+
+                {favoriteTags.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs text-[#8ba3b5] mb-1.5">選択中：</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {favoriteTags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="flex items-center gap-1 text-xs bg-[#1b9aff]/20 text-[#1b9aff] border border-[#1b9aff]/40 px-2 py-0.5 rounded-full"
+                        >
+                          {tag}
+                          <button onClick={() => toggleTag(tag)} className="hover:text-white">×</button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="カスタムタグを追加"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addCustomTag()}
+                    className="flex-1 bg-[#1b2838] border border-[#2a475e] rounded-lg px-3 py-1.5 text-xs text-[#c7d5e0] placeholder-[#4a6b7c] focus:outline-none focus:border-[#1b9aff] transition-colors"
+                  />
+                  <button
+                    onClick={addCustomTag}
+                    className="text-xs bg-[#2a475e] hover:bg-[#1b9aff] text-[#c7d5e0] hover:text-white px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    追加
+                  </button>
+                </div>
               </div>
             )}
 
@@ -420,6 +527,7 @@ export default function Home() {
                     game={game}
                     rank={i + 1}
                     weights={weights}
+                    favoriteTags={favoriteTags}
                     style={{ animationDelay: `${i * 50}ms`, opacity: 0 }}
                   />
                 ))}

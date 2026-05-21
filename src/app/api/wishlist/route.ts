@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveToSteamId64 } from "@/lib/steamUtils";
 import { getHLTBData } from "@/lib/hltb";
+import { getSteamSpyTags } from "@/lib/steamspy";
 import type { GameResult, ApiResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -209,6 +210,8 @@ async function processAppIdBatch(appids: number[]): Promise<GameResult[]> {
       hltbMainStory: null,
       hltbCompletionist: null,
       pricePerHour: null,
+      tags: [],
+      tagMatchCount: 0,
     });
   }
 
@@ -226,7 +229,11 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
   try {
     const { searchParams } = new URL(req.url);
     const steamIdParam = searchParams.get("steamid");
-    console.log(`[WishScore] GET /api/wishlist?steamid=${steamIdParam}`);
+    const favoriteTagsParam = searchParams.get("favoriteTags") ?? "";
+    const favoriteTags = favoriteTagsParam
+      ? favoriteTagsParam.split(",").map((t) => t.trim()).filter(Boolean)
+      : [];
+    console.log(`[WishScore] GET /api/wishlist?steamid=${steamIdParam} favoriteTags=${favoriteTags.join(",")}`);
 
     if (!steamIdParam || steamIdParam.trim() === "") {
       return NextResponse.json(
@@ -292,16 +299,27 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
       allResults.push(...batchResults);
     }
 
-    // HLTB: fetch serially for top 50 paid games (sorted by base score)
-    const HLTB_LIMIT = 50;
-    const paidForHltb = allResults
+    // HLTB + SteamSpy: fetch in parallel per game, serially across games (500ms interval)
+    const ENRICH_LIMIT = 50;
+    const paidForEnrich = allResults
       .filter((g) => !g.isFree && !g.isUnreleased && g.priceJPY > 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, HLTB_LIMIT);
+      .slice(0, ENRICH_LIMIT);
 
-    console.log(`[WishScore] Fetching HLTB data for ${paidForHltb.length} games`);
-    for (const game of paidForHltb) {
-      const hltb = await getHLTBData(game.name);
+    console.log(`[WishScore] Enriching ${paidForEnrich.length} games with HLTB + SteamSpy`);
+    for (const game of paidForEnrich) {
+      const [hltb, tags] = await Promise.all([
+        getHLTBData(game.name),
+        getSteamSpyTags(game.appid),
+      ]);
+
+      game.tags = tags;
+      const matchCount = favoriteTags.length > 0
+        ? tags.filter((t) => favoriteTags.includes(t)).length
+        : 0;
+      game.tagMatchCount = matchCount;
+      const tagBonus = Math.min(2.0, 1 + matchCount * 0.2);
+
       if (hltb) {
         game.hltbMainStory = hltb.mainStory;
         game.hltbCompletionist = hltb.completionist;
@@ -309,17 +327,21 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
           hltb.mainStory && hltb.mainStory > 0
             ? Math.round(game.priceJPY / hltb.mainStory)
             : null;
-        const hltbBonus = game.pricePerHour
-          ? Math.max(1.0, 20 / game.pricePerHour)
-          : 1.0;
+      }
+      const hltbBonus = game.pricePerHour
+        ? Math.max(1.0, 20 / game.pricePerHour)
+        : 1.0;
+
+      if (game.priceJPY > 0) {
         game.score = calculateScore(
           game.positiveRate,
           game.reviewTotal,
           game.discountPercent,
           game.priceJPY,
           hltbBonus
-        );
+        ) * tagBonus;
       }
+
       await new Promise((r) => setTimeout(r, 500));
     }
 
