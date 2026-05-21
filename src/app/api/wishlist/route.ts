@@ -195,6 +195,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         const favoriteTags = favoriteTagsParam
           ? favoriteTagsParam.split(",").map((t) => t.trim()).filter(Boolean)
           : [];
+        const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
 
         if (!steamIdParam.trim()) {
           send({ type: "error", error: "INVALID_STEAMID" });
@@ -238,10 +239,20 @@ export async function GET(req: NextRequest): Promise<Response> {
           return;
         }
 
-        const targets = allAppIds.slice(0, ANALYZE_LIMIT);
+        const targets = allAppIds.slice(offset, offset + ANALYZE_LIMIT);
+
+        if (targets.length === 0) {
+          send({ type: "complete", games: [], freeGames: [], unreleasedGames: [], totalCount: allAppIds.length, analyzedCount: offset, hasMore: false });
+          controller.close();
+          return;
+        }
+
+        const rangeLabel = offset === 0
+          ? `上位${targets.length}本`
+          : `${offset + 1}〜${offset + targets.length}件目`;
         send({
           type: "progress",
-          message: `${allAppIds.length}本を取得。上位${targets.length}本を分析中...`,
+          message: `${allAppIds.length}本を取得。${rangeLabel}を分析中...`,
           current: 0,
           total: targets.length,
         });
@@ -276,7 +287,8 @@ export async function GET(req: NextRequest): Promise<Response> {
           freeGames,
           unreleasedGames,
           totalCount: allAppIds.length,
-          analyzedCount: targets.length,
+          analyzedCount: offset + targets.length,
+          hasMore: offset + targets.length < allAppIds.length,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "SERVER_ERROR";
