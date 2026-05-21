@@ -305,9 +305,9 @@ export default function Home() {
   const [games, setGames] = useState<GameResult[]>([]);
   const [freeGames, setFreeGames] = useState<GameResult[]>([]);
   const [unreleasedGames, setUnreleasedGames] = useState<GameResult[]>([]);
+  const [allScoredGames, setAllScoredGames] = useState<GameResult[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [analyzedCount, setAnalyzedCount] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [progressMessage, setProgressMessage] = useState("");
   const [progressCurrent, setProgressCurrent] = useState(0);
@@ -390,10 +390,10 @@ export default function Home() {
     setGames([]);
     setFreeGames([]);
     setUnreleasedGames([]);
+    setAllScoredGames([]);
     setStreamingGames([]);
     setTotalCount(0);
     setAnalyzedCount(0);
-    setHasMore(false);
     setIsComplete(false);
     setProgressMessage("分析開始中...");
     setProgressCurrent(0);
@@ -414,6 +414,9 @@ export default function Home() {
           setProgressMessage(data.message ?? "");
           setProgressCurrent(data.current ?? 0);
           setProgressTotal(data.total ?? 0);
+        } else if (data.type === "allScores") {
+          setAllScoredGames(data.games ?? []);
+          setTotalCount(data.totalCount ?? 0);
         } else if (data.type === "game") {
           if (data.game) setStreamingGames((prev) => [...prev, data.game!]);
           setProgressCurrent(data.current ?? 0);
@@ -425,7 +428,6 @@ export default function Home() {
           setUnreleasedGames(data.unreleasedGames ?? []);
           setTotalCount(data.totalCount ?? 0);
           setAnalyzedCount(data.analyzedCount ?? 0);
-          setHasMore(data.hasMore ?? false);
           setIsComplete(true);
           setLoading(false);
           localStorage.setItem("wishscore_steamid", steamId.trim());
@@ -452,22 +454,27 @@ export default function Home() {
   }
 
   function handleLoadMore() {
-    if (!steamId.trim() || loadingMore) return;
+    if (loadingMore) return;
 
     if (loadMoreEsRef.current) {
       loadMoreEsRef.current.close();
       loadMoreEsRef.current = null;
     }
 
+    // Use cached Step 1 results to know which appids to detail next
+    const currentAnalyzed = analyzedCount;
+    const nextBatch = allScoredGames.slice(currentAnalyzed, currentAnalyzed + 20);
+    if (nextBatch.length === 0) return;
+
+    const batchSize = nextBatch.length;
+    const appids = nextBatch.map((g) => g.appid).join(",");
+
     setLoadingMore(true);
     setLoadMoreCurrent(0);
-    setLoadMoreTotal(0);
+    setLoadMoreTotal(batchSize);
     loadMoreCompletedRef.current = false;
 
-    const params = new URLSearchParams({
-      steamid: steamId.trim(),
-      offset: String(analyzedCount),
-    });
+    const params = new URLSearchParams({ mode: "details", appids });
     if (favoriteTags.length > 0) params.set("favoriteTags", favoriteTags.join(","));
 
     const es = new EventSource(`/api/wishlist?${params.toString()}`);
@@ -505,8 +512,7 @@ export default function Home() {
             });
           }
 
-          setAnalyzedCount(data.analyzedCount ?? analyzedCount);
-          setHasMore(data.hasMore ?? false);
+          setAnalyzedCount(currentAnalyzed + batchSize);
           setLoadingMore(false);
           es.close();
           loadMoreEsRef.current = null;
@@ -525,6 +531,7 @@ export default function Home() {
     };
   }
 
+  const hasMore = isComplete && !loadingMore && allScoredGames.length > analyzedCount;
   const hasResults = isComplete || (loading && streamingGames.length > 0);
 
   return (
@@ -661,8 +668,10 @@ export default function Home() {
             <div className="flex items-center justify-between mb-3">
               <p className="text-[#8ba3b5] text-xs">
                 {isComplete
-                  ? `${totalCount}本を取得 · 上位${analyzedCount}本を分析 · スコア対象: ${games.length}本`
-                  : `分析中... ${streamingGames.filter(g => !g.isFree && !g.isUnreleased).length}本処理済み`
+                  ? `全${totalCount}件 · 詳細分析済み: ${analyzedCount}件 · ランキング対象: ${games.length}本`
+                  : allScoredGames.length > 0
+                    ? `全${totalCount}件スキャン済み · 上位${streamingGames.filter(g => !g.isFree && !g.isUnreleased).length}件を詳細分析中...`
+                    : `基本情報を取得中...`
                 }
               </p>
               {isComplete && (
@@ -863,17 +872,17 @@ export default function Home() {
                   {loadingMore ? (
                     <span className="flex items-center gap-2">
                       <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                      分析中...{loadMoreTotal > 0 ? ` (${loadMoreCurrent}/${loadMoreTotal})` : ""}
+                      詳細分析中...{loadMoreTotal > 0 ? ` (${loadMoreCurrent}/${loadMoreTotal})` : ""}
                     </span>
                   ) : (
-                    `さらに20件分析する（${analyzedCount + 1}〜${Math.min(analyzedCount + 20, totalCount)}件目）`
+                    `さらに詳細分析する（${analyzedCount + 1}〜${Math.min(analyzedCount + 20, allScoredGames.length)}位）`
                   )}
                 </button>
               </div>
             )}
-            {isComplete && !hasMore && totalCount > 0 && (
+            {isComplete && !hasMore && allScoredGames.length > 0 && (
               <p className="text-center text-xs text-[#4a6b7c] mt-2 mb-4">
-                全{totalCount}本を分析済み
+                全{allScoredGames.length}件の詳細分析が完了しました
               </p>
             )}
           </>
