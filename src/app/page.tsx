@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { GameResult, ApiResponse } from "@/lib/types";
 
 function scoreColor(score: number): string {
@@ -171,9 +171,24 @@ function WeightSlider({
 
 export default function Home() {
   const [steamId, setSteamId] = useState("");
+  const [savedId, setSavedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("wishscore_steamid");
+    if (saved) {
+      setSteamId(saved);
+      setSavedId(saved);
+    }
+  }, []);
+
+  function clearSavedId() {
+    localStorage.removeItem("wishscore_steamid");
+    setSavedId(null);
+    setSteamId("");
+  }
   const [weights, setWeights] = useState({
     discount: 2.0,
     review: 1.0,
@@ -208,6 +223,8 @@ export default function Home() {
         setError(data.error);
       } else {
         setResults(data);
+        localStorage.setItem("wishscore_steamid", steamId.trim());
+        setSavedId(steamId.trim());
       }
     } catch {
       setError("FETCH_ERROR");
@@ -248,18 +265,31 @@ export default function Home() {
               {loading ? "..." : "分析"}
             </button>
           </div>
-          <p className="text-xs text-[#4a6b7c] mt-2">
-            SteamIDの調べ方は{" "}
-            <a
-              href="https://steamid.io/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[#1b9aff] hover:underline"
-            >
-              steamid.io
-            </a>{" "}
-            で確認できます
-          </p>
+          <div className="flex items-center justify-between mt-2 flex-wrap gap-1">
+            <p className="text-xs text-[#4a6b7c]">
+              SteamIDの調べ方は{" "}
+              <a
+                href="https://steamid.io/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#1b9aff] hover:underline"
+              >
+                steamid.io
+              </a>{" "}
+              で確認できます
+            </p>
+            {savedId && (
+              <p className="text-xs text-[#4a6b7c]">
+                前回のID: <span className="text-[#8ba3b5]">{savedId}</span>{" "}
+                <button
+                  onClick={clearSavedId}
+                  className="text-[#1b9aff] hover:underline"
+                >
+                  （クリアする）
+                </button>
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Loading */}
