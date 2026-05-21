@@ -199,11 +199,10 @@ function GameCard({
         </div>
 
         {game.hltbMainStory && (
-          <div className="flex items-center gap-1.5 mt-1 text-xs text-[#4a6b7c]">
-            <span>🕐</span>
-            <span>約{game.hltbMainStory}時間</span>
+          <div className="flex items-center gap-1.5 mt-1 text-sm text-[#94a3b8]">
+            <span>🕐 約{game.hltbMainStory}時間</span>
             {game.pricePerHour !== null && (
-              <span>/ ¥{game.pricePerHour.toLocaleString()}/時間</span>
+              <span>・ ¥{game.pricePerHour.toLocaleString()}/時間</span>
             )}
           </div>
         )}
