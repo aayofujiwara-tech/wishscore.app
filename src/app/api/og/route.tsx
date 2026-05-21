@@ -18,7 +18,7 @@ async function loadFont(): Promise<ArrayBuffer | null> {
 }
 
 function scoreColor(score: number): string {
-  if (score >= 10) return "#4ade80";
+  if (score >= 8) return "#4ade80";
   if (score >= 5) return "#fb923c";
   return "#94a3b8";
 }

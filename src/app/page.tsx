@@ -325,8 +325,14 @@ export default function Home() {
   const loadMoreCompletedRef = useRef(false);
 
   useEffect(() => {
-    const savedSteamId = localStorage.getItem("wishscore_steamid");
-    if (savedSteamId) { setSteamId(savedSteamId); setSavedId(savedSteamId); }
+    // URL param takes priority (e.g. coming from a share page link)
+    const urlSteamId = new URLSearchParams(window.location.search).get("steamid");
+    if (urlSteamId) {
+      setSteamId(urlSteamId);
+    } else {
+      const savedSteamId = localStorage.getItem("wishscore_steamid");
+      if (savedSteamId) { setSteamId(savedSteamId); setSavedId(savedSteamId); }
+    }
     const savedTags = localStorage.getItem("wishscore_favorite_tags");
     if (savedTags) {
       try { setFavoriteTags(JSON.parse(savedTags) as string[]); } catch { /* ignore */ }
