@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameResult } from "@/lib/types";
 
 function scoreColor(score: number): string {
-  if (score >= 10) return "#4ade80";
+  if (score >= 8) return "#4ade80";
   if (score >= 5) return "#fb923c";
   return "#94a3b8";
 }
@@ -104,19 +104,19 @@ function GameCard({
       <div className="w-1 flex-shrink-0" style={{ background: color }} />
 
       {/* Thumbnail */}
-      <div className="w-20 sm:w-24 h-16 flex-shrink-0 overflow-hidden my-3 rounded">
+      <div className="w-24 sm:w-28 h-16 flex-shrink-0 overflow-hidden my-3 rounded bg-[#0f1923]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={game.headerImage}
           alt={game.name}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain"
         />
       </div>
 
       {/* Info */}
       <div className="flex-1 min-w-0 py-2 sm:py-3 pr-2 sm:pr-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-start gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             {badge && (
               <span className="text-lg flex-shrink-0">{badge.icon}</span>
             )}
@@ -129,16 +129,33 @@ function GameCard({
               {game.name}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {game.discountPercent > 0 && (
-              <span className="text-lg sm:text-xl">🔥</span>
-            )}
-            <span
-              className="font-rajdhani font-bold text-2xl sm:text-3xl"
-              style={{ color }}
-            >
-              {score.toFixed(1)}
-            </span>
+          {/* Right column: share buttons (top) + score (bottom) */}
+          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+            <div className="flex gap-1">
+              <button
+                onClick={handleShare}
+                title="X(Twitter)でシェア"
+                className="p-2 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] hover:bg-[#1b2f45] transition-colors leading-none text-xs"
+              >
+                𝕏
+              </button>
+              <button
+                onClick={handleCopy}
+                title="URLをコピー"
+                className="p-2 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] hover:bg-[#1b2f45] transition-colors leading-none text-xs"
+              >
+                {copied ? "✓" : "📋"}
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              {score >= 8 && <span className="text-base">🔥</span>}
+              <span
+                className="font-rajdhani font-bold text-2xl sm:text-3xl"
+                style={{ color }}
+              >
+                {score.toFixed(1)}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -214,24 +231,6 @@ function GameCard({
         )}
       </div>
       </a>
-
-      {/* Share buttons */}
-      <div className="absolute top-2 right-2 flex gap-1">
-        <button
-          onClick={handleShare}
-          title="X(Twitter)でシェア"
-          className="text-xs px-2 py-1 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] transition-colors"
-        >
-          𝕏
-        </button>
-        <button
-          onClick={handleCopy}
-          title="URLをコピー"
-          className="text-xs px-2 py-1 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] transition-colors"
-        >
-          {copied ? "✓" : "📋"}
-        </button>
-      </div>
     </div>
   );
 }
@@ -287,6 +286,7 @@ type SseData = {
   unreleasedGames?: GameResult[];
   totalCount?: number;
   analyzedCount?: number;
+  hasMore?: boolean;
   error?: string;
 };
 
@@ -307,14 +307,22 @@ export default function Home() {
   const [unreleasedGames, setUnreleasedGames] = useState<GameResult[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [analyzedCount, setAnalyzedCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [progressMessage, setProgressMessage] = useState("");
   const [progressCurrent, setProgressCurrent] = useState(0);
   const [progressTotal, setProgressTotal] = useState(0);
   const [streamingGames, setStreamingGames] = useState<GameResult[]>([]);
 
+  // Load-more state
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreCurrent, setLoadMoreCurrent] = useState(0);
+  const [loadMoreTotal, setLoadMoreTotal] = useState(0);
+
   const eventSourceRef = useRef<EventSource | null>(null);
   const completedRef = useRef(false);
+  const loadMoreEsRef = useRef<EventSource | null>(null);
+  const loadMoreCompletedRef = useRef(false);
 
   useEffect(() => {
     const savedSteamId = localStorage.getItem("wishscore_steamid");
@@ -325,6 +333,7 @@ export default function Home() {
     }
     return () => {
       if (eventSourceRef.current) eventSourceRef.current.close();
+      if (loadMoreEsRef.current) loadMoreEsRef.current.close();
     };
   }, []);
 
@@ -370,7 +379,13 @@ export default function Home() {
       eventSourceRef.current = null;
     }
 
+    if (loadMoreEsRef.current) {
+      loadMoreEsRef.current.close();
+      loadMoreEsRef.current = null;
+    }
+
     setLoading(true);
+    setLoadingMore(false);
     setError(null);
     setGames([]);
     setFreeGames([]);
@@ -378,6 +393,7 @@ export default function Home() {
     setStreamingGames([]);
     setTotalCount(0);
     setAnalyzedCount(0);
+    setHasMore(false);
     setIsComplete(false);
     setProgressMessage("分析開始中...");
     setProgressCurrent(0);
@@ -409,6 +425,7 @@ export default function Home() {
           setUnreleasedGames(data.unreleasedGames ?? []);
           setTotalCount(data.totalCount ?? 0);
           setAnalyzedCount(data.analyzedCount ?? 0);
+          setHasMore(data.hasMore ?? false);
           setIsComplete(true);
           setLoading(false);
           localStorage.setItem("wishscore_steamid", steamId.trim());
@@ -431,6 +448,80 @@ export default function Home() {
       }
       es.close();
       eventSourceRef.current = null;
+    };
+  }
+
+  function handleLoadMore() {
+    if (!steamId.trim() || loadingMore) return;
+
+    if (loadMoreEsRef.current) {
+      loadMoreEsRef.current.close();
+      loadMoreEsRef.current = null;
+    }
+
+    setLoadingMore(true);
+    setLoadMoreCurrent(0);
+    setLoadMoreTotal(0);
+    loadMoreCompletedRef.current = false;
+
+    const params = new URLSearchParams({
+      steamid: steamId.trim(),
+      offset: String(analyzedCount),
+    });
+    if (favoriteTags.length > 0) params.set("favoriteTags", favoriteTags.join(","));
+
+    const es = new EventSource(`/api/wishlist?${params.toString()}`);
+    loadMoreEsRef.current = es;
+
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data as string) as SseData;
+
+        if (data.type === "game") {
+          setLoadMoreCurrent(data.current ?? 0);
+          setLoadMoreTotal(data.total ?? 0);
+        } else if (data.type === "complete") {
+          loadMoreCompletedRef.current = true;
+
+          if (data.games && data.games.length > 0) {
+            setGames((prev) => {
+              const existingIds = new Set(prev.map((g) => g.appid));
+              const added = data.games!.filter((g) => !existingIds.has(g.appid));
+              return [...prev, ...added].sort((a, b) => b.score - a.score);
+            });
+          }
+          if (data.freeGames && data.freeGames.length > 0) {
+            setFreeGames((prev) => {
+              const existingIds = new Set(prev.map((g) => g.appid));
+              const added = data.freeGames!.filter((g) => !existingIds.has(g.appid));
+              return [...prev, ...added].sort((a, b) => b.positiveRate - a.positiveRate);
+            });
+          }
+          if (data.unreleasedGames && data.unreleasedGames.length > 0) {
+            setUnreleasedGames((prev) => {
+              const existingIds = new Set(prev.map((g) => g.appid));
+              const added = data.unreleasedGames!.filter((g) => !existingIds.has(g.appid));
+              return [...prev, ...added];
+            });
+          }
+
+          setAnalyzedCount(data.analyzedCount ?? analyzedCount);
+          setHasMore(data.hasMore ?? false);
+          setLoadingMore(false);
+          es.close();
+          loadMoreEsRef.current = null;
+        } else if (data.type === "error") {
+          setLoadingMore(false);
+          es.close();
+          loadMoreEsRef.current = null;
+        }
+      } catch { /* ignore */ }
+    };
+
+    es.onerror = () => {
+      if (!loadMoreCompletedRef.current) setLoadingMore(false);
+      es.close();
+      loadMoreEsRef.current = null;
     };
   }
 
@@ -761,17 +852,29 @@ export default function Home() {
               </div>
             )}
 
-            {/* "Load more" placeholder (after complete) */}
-            {isComplete && (
+            {/* Load more */}
+            {isComplete && hasMore && (
               <div className="text-center mt-2 mb-4">
                 <button
-                  disabled
-                  className="text-sm text-[#4a6b7c] border border-[#2a475e] rounded-lg px-5 py-2 opacity-50 cursor-not-allowed"
-                  title="近日対応予定"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  className="text-sm border rounded-lg px-5 py-2.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-[#c7d5e0] border-[#2a475e] hover:border-[#1b9aff] hover:text-[#1b9aff]"
                 >
-                  さらに20件分析する（近日対応）
+                  {loadingMore ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      分析中...{loadMoreTotal > 0 ? ` (${loadMoreCurrent}/${loadMoreTotal})` : ""}
+                    </span>
+                  ) : (
+                    `さらに20件分析する（${analyzedCount + 1}〜${Math.min(analyzedCount + 20, totalCount)}件目）`
+                  )}
                 </button>
               </div>
+            )}
+            {isComplete && !hasMore && totalCount > 0 && (
+              <p className="text-center text-xs text-[#4a6b7c] mt-2 mb-4">
+                全{totalCount}本を分析済み
+              </p>
             )}
           </>
         )}
