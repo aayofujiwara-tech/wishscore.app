@@ -202,103 +202,86 @@ async function processAppIdBatch(appids: number[]): Promise<GameResult[]> {
   return results;
 }
 
+const EMPTY_RESPONSE = {
+  games: [] as GameResult[],
+  totalCount: 0,
+  freeGames: [] as GameResult[],
+  unreleasedGames: [] as GameResult[],
+};
+
 export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> {
-  const { searchParams } = new URL(req.url);
-  const steamIdParam = searchParams.get("steamid");
-
-  if (!steamIdParam || steamIdParam.trim() === "") {
-    return NextResponse.json(
-      {
-        games: [],
-        totalCount: 0,
-        freeGames: [],
-        unreleasedGames: [],
-        error: "INVALID_STEAMID",
-      },
-      { status: 400 }
-    );
-  }
-
-  const apiKey = process.env.STEAM_API_KEY ?? "";
-
-  let steamId: string;
   try {
-    steamId = await resolveToSteamId64(steamIdParam, apiKey);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      {
-        games: [],
-        totalCount: 0,
-        freeGames: [],
-        unreleasedGames: [],
-        error: message.includes("resolve") ? "INVALID_STEAMID" : message,
-      },
-      { status: 400 }
-    );
-  }
+    const { searchParams } = new URL(req.url);
+    const steamIdParam = searchParams.get("steamid");
 
-  let allAppIds: number[];
-  try {
-    allAppIds = await fetchAllWishlistAppIds(steamId);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message === "PRIVATE_WISHLIST") {
+    if (!steamIdParam || steamIdParam.trim() === "") {
       return NextResponse.json(
-        {
-          games: [],
-          totalCount: 0,
-          freeGames: [],
-          unreleasedGames: [],
-          error: "PRIVATE_WISHLIST",
-        },
-        { status: 403 }
+        { ...EMPTY_RESPONSE, error: "INVALID_STEAMID" },
+        { status: 400 }
       );
     }
+
+    const apiKey = process.env.STEAM_API_KEY ?? "";
+
+    let steamId: string;
+    try {
+      steamId = await resolveToSteamId64(steamIdParam, apiKey);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return NextResponse.json(
+        { ...EMPTY_RESPONSE, error: message.includes("resolve") ? "INVALID_STEAMID" : message },
+        { status: 400 }
+      );
+    }
+
+    let allAppIds: number[];
+    try {
+      allAppIds = await fetchAllWishlistAppIds(steamId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "PRIVATE_WISHLIST") {
+        return NextResponse.json(
+          { ...EMPTY_RESPONSE, error: "PRIVATE_WISHLIST" },
+          { status: 403 }
+        );
+      }
+      return NextResponse.json(
+        { ...EMPTY_RESPONSE, error: message },
+        { status: 500 }
+      );
+    }
+
+    if (allAppIds.length === 0) {
+      return NextResponse.json(EMPTY_RESPONSE);
+    }
+
+    const BATCH_SIZE = 5;
+    const allResults: GameResult[] = [];
+
+    for (let i = 0; i < allAppIds.length; i += BATCH_SIZE) {
+      const batch = allAppIds.slice(i, i + BATCH_SIZE);
+      const batchResults = await processAppIdBatch(batch);
+      allResults.push(...batchResults);
+    }
+
+    const paidGames = allResults.filter((g) => !g.isFree && !g.isUnreleased);
+    const freeGames = allResults.filter((g) => g.isFree);
+    const unreleasedGames = allResults.filter((g) => g.isUnreleased);
+
+    paidGames.sort((a, b) => b.score - a.score);
+    freeGames.sort((a, b) => b.positiveRate - a.positiveRate);
+
+    return NextResponse.json({
+      games: paidGames,
+      totalCount: allResults.length,
+      freeGames,
+      unreleasedGames,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      {
-        games: [],
-        totalCount: 0,
-        freeGames: [],
-        unreleasedGames: [],
-        error: message,
-      },
+      { ...EMPTY_RESPONSE, error: `SERVER_ERROR: ${message}` },
       { status: 500 }
     );
   }
-
-  if (allAppIds.length === 0) {
-    return NextResponse.json({
-      games: [],
-      totalCount: 0,
-      freeGames: [],
-      unreleasedGames: [],
-    });
-  }
-
-  // Process in batches of 5
-  const BATCH_SIZE = 5;
-  const allResults: GameResult[] = [];
-
-  for (let i = 0; i < allAppIds.length; i += BATCH_SIZE) {
-    const batch = allAppIds.slice(i, i + BATCH_SIZE);
-    const batchResults = await processAppIdBatch(batch);
-    allResults.push(...batchResults);
-  }
-
-  const paidGames = allResults.filter((g) => !g.isFree && !g.isUnreleased);
-  const freeGames = allResults.filter((g) => g.isFree);
-  const unreleasedGames = allResults.filter((g) => g.isUnreleased);
-
-  // Sort paid games by score descending
-  paidGames.sort((a, b) => b.score - a.score);
-  // Sort free games by positive rate descending
-  freeGames.sort((a, b) => b.positiveRate - a.positiveRate);
-
-  return NextResponse.json({
-    games: paidGames,
-    totalCount: allResults.length,
-    freeGames,
-    unreleasedGames,
-  });
 }
