@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameResult } from "@/lib/types";
 
 function scoreColor(score: number): string {
-  if (score >= 10) return "#4ade80";
+  if (score >= 8) return "#4ade80";
   if (score >= 5) return "#fb923c";
   return "#94a3b8";
 }
@@ -104,19 +104,19 @@ function GameCard({
       <div className="w-1 flex-shrink-0" style={{ background: color }} />
 
       {/* Thumbnail */}
-      <div className="w-20 sm:w-24 h-16 flex-shrink-0 overflow-hidden my-3 rounded">
+      <div className="w-24 sm:w-28 h-16 flex-shrink-0 overflow-hidden my-3 rounded bg-[#0f1923]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={game.headerImage}
           alt={game.name}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain"
         />
       </div>
 
       {/* Info */}
       <div className="flex-1 min-w-0 py-2 sm:py-3 pr-2 sm:pr-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-start gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             {badge && (
               <span className="text-lg flex-shrink-0">{badge.icon}</span>
             )}
@@ -129,16 +129,33 @@ function GameCard({
               {game.name}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {game.discountPercent > 0 && (
-              <span className="text-lg sm:text-xl">🔥</span>
-            )}
-            <span
-              className="font-rajdhani font-bold text-2xl sm:text-3xl"
-              style={{ color }}
-            >
-              {score.toFixed(1)}
-            </span>
+          {/* Right column: share buttons (top) + score (bottom) */}
+          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+            <div className="flex gap-1">
+              <button
+                onClick={handleShare}
+                title="X(Twitter)でシェア"
+                className="p-2 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] hover:bg-[#1b2f45] transition-colors leading-none text-xs"
+              >
+                𝕏
+              </button>
+              <button
+                onClick={handleCopy}
+                title="URLをコピー"
+                className="p-2 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] hover:bg-[#1b2f45] transition-colors leading-none text-xs"
+              >
+                {copied ? "✓" : "📋"}
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              {score >= 8 && <span className="text-base">🔥</span>}
+              <span
+                className="font-rajdhani font-bold text-2xl sm:text-3xl"
+                style={{ color }}
+              >
+                {score.toFixed(1)}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -214,24 +231,6 @@ function GameCard({
         )}
       </div>
       </a>
-
-      {/* Share buttons */}
-      <div className="absolute top-2 right-2 flex gap-1">
-        <button
-          onClick={handleShare}
-          title="X(Twitter)でシェア"
-          className="text-xs px-2 py-1 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] transition-colors"
-        >
-          𝕏
-        </button>
-        <button
-          onClick={handleCopy}
-          title="URLをコピー"
-          className="text-xs px-2 py-1 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] transition-colors"
-        >
-          {copied ? "✓" : "📋"}
-        </button>
-      </div>
     </div>
   );
 }
