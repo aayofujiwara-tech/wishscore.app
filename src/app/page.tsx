@@ -200,6 +200,10 @@ export default function Home() {
       const res = await fetch(
         `/api/wishlist?steamid=${encodeURIComponent(steamId.trim())}`
       );
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`API returned HTTP ${res.status}`);
+      }
       const data = (await res.json()) as ApiResponse;
 
       if (data.error) {
