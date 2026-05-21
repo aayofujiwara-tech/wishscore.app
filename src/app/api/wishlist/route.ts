@@ -33,63 +33,40 @@ async function fetchWithRetry(
   throw new Error("Max retries exceeded");
 }
 
-async function fetchAllWishlistAppIds(steamId: string): Promise<number[]> {
-  const allAppIds: number[] = [];
-  let page = 0;
+type WishlistItem = { appid: number; priority: number; date_added: number };
+type WishlistResponse = { response?: { items?: WishlistItem[] } };
 
-  while (true) {
-    const url = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${page}`;
-    console.log(`[WishScore] Fetching wishlist page ${page}: ${url}`);
-    const res = await fetchWithRetry(url, RETRY_LIMIT, BROWSER_HEADERS);
+async function fetchAllWishlistAppIds(steamId: string, apiKey: string): Promise<number[]> {
+  const url = `https://api.steampowered.com/IWishlistService/GetWishlist/v1?steamid=${steamId}&key=${apiKey}`;
+  console.log(`[WishScore] Fetching wishlist: ${url.replace(apiKey, "***")}`);
 
-    const contentType = res.headers.get("content-type") ?? "";
-    console.log(`[WishScore] Page ${page}: status=${res.status}, content-type=${contentType}`);
+  const res = await fetchWithRetry(url);
+  const contentType = res.headers.get("content-type") ?? "";
+  console.log(`[WishScore] Wishlist response: status=${res.status}, content-type=${contentType}`);
 
-    if (!res.ok) {
-      throw new Error(`Wishlist fetch error: HTTP ${res.status}`);
-    }
-
-    const bodyText = await res.text();
-    console.log(`[WishScore] Page ${page} body (first 200 chars): ${bodyText.slice(0, 200)}`);
-
-    // If body starts with HTML, it's a private/invalid wishlist
-    if (bodyText.trimStart().startsWith("<")) {
-      console.log(`[WishScore] HTML response detected — private or invalid SteamID`);
-      throw new Error("PRIVATE_WISHLIST");
-    }
-
-    let data: Record<string, unknown>;
-    try {
-      data = JSON.parse(bodyText) as Record<string, unknown>;
-    } catch (e) {
-      console.error(`[WishScore] Failed to parse JSON: ${e}`);
-      throw new Error("PRIVATE_WISHLIST");
-    }
-
-    console.log(`[WishScore] Page ${page} keys: ${Object.keys(data).slice(0, 5).join(", ")}`);
-
-    if (!data || Object.keys(data).length === 0) {
-      break;
-    }
-
-    // Private wishlist returns { success: 2 }
-    if ("success" in data && data.success === 2) {
-      throw new Error("PRIVATE_WISHLIST");
-    }
-
-    const ids = Object.keys(data)
-      .filter((k) => /^\d+$/.test(k))
-      .map(Number);
-
-    if (ids.length === 0) {
-      break;
-    }
-
-    allAppIds.push(...ids);
-    page++;
+  if (!res.ok) {
+    throw new Error(`Wishlist fetch error: HTTP ${res.status}`);
   }
 
-  return allAppIds;
+  const bodyText = await res.text();
+  console.log(`[WishScore] Wishlist body (first 200 chars): ${bodyText.slice(0, 200)}`);
+
+  let data: WishlistResponse;
+  try {
+    data = JSON.parse(bodyText) as WishlistResponse;
+  } catch (e) {
+    console.error(`[WishScore] Failed to parse wishlist JSON: ${e}`);
+    throw new Error("PRIVATE_WISHLIST");
+  }
+
+  const items = data.response?.items ?? [];
+  console.log(`[WishScore] Wishlist items count: ${items.length}`);
+
+  if (items.length === 0) {
+    return [];
+  }
+
+  return items.map((item) => item.appid);
 }
 
 type AppDetailsData = {
@@ -277,7 +254,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
 
     let allAppIds: number[];
     try {
-      allAppIds = await fetchAllWishlistAppIds(steamId);
+      allAppIds = await fetchAllWishlistAppIds(steamId, apiKey);
       console.log(`[WishScore] Total appids fetched: ${allAppIds.length}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
