@@ -22,6 +22,7 @@ export type GameResult = {
 export type ApiResponse = {
   games: GameResult[];
   totalCount: number;
+  analyzedCount: number;
   freeGames: GameResult[];
   unreleasedGames: GameResult[];
   error?: string;
