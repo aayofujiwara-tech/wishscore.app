@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveToSteamId64 } from "@/lib/steamUtils";
+import { getHLTBData } from "@/lib/hltb";
 import type { GameResult, ApiResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -132,11 +133,12 @@ function calculateScore(
   positiveRate: number,
   reviewTotal: number,
   discountPercent: number,
-  priceJPY: number
+  priceJPY: number,
+  hltbBonus = 1.0
 ): number {
   const reviewWeight = Math.log10(reviewTotal + 1);
   const discountBoost = Math.pow(1 + discountPercent / 100, 2);
-  return (positiveRate * reviewWeight * discountBoost / priceJPY) * 1000;
+  return (positiveRate * reviewWeight * discountBoost / priceJPY) * 1000 * hltbBonus;
 }
 
 async function processAppIdBatch(appids: number[]): Promise<GameResult[]> {
@@ -204,6 +206,9 @@ async function processAppIdBatch(appids: number[]): Promise<GameResult[]> {
       isUnreleased,
       shortDescription,
       genres,
+      hltbMainStory: null,
+      hltbCompletionist: null,
+      pricePerHour: null,
     });
   }
 
@@ -285,6 +290,37 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
       const batch = allAppIds.slice(i, i + BATCH_SIZE);
       const batchResults = await processAppIdBatch(batch);
       allResults.push(...batchResults);
+    }
+
+    // HLTB: fetch serially for top 50 paid games (sorted by base score)
+    const HLTB_LIMIT = 50;
+    const paidForHltb = allResults
+      .filter((g) => !g.isFree && !g.isUnreleased && g.priceJPY > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, HLTB_LIMIT);
+
+    console.log(`[WishScore] Fetching HLTB data for ${paidForHltb.length} games`);
+    for (const game of paidForHltb) {
+      const hltb = await getHLTBData(game.name);
+      if (hltb) {
+        game.hltbMainStory = hltb.mainStory;
+        game.hltbCompletionist = hltb.completionist;
+        game.pricePerHour =
+          hltb.mainStory && hltb.mainStory > 0
+            ? Math.round(game.priceJPY / hltb.mainStory)
+            : null;
+        const hltbBonus = game.pricePerHour
+          ? Math.max(1.0, 20 / game.pricePerHour)
+          : 1.0;
+        game.score = calculateScore(
+          game.positiveRate,
+          game.reviewTotal,
+          game.discountPercent,
+          game.priceJPY,
+          hltbBonus
+        );
+      }
+      await new Promise((r) => setTimeout(r, 500));
     }
 
     const paidGames = allResults.filter((g) => !g.isFree && !g.isUnreleased);
