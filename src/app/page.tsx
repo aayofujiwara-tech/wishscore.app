@@ -207,13 +207,7 @@ export default function Home() {
       const data = (await res.json()) as ApiResponse;
 
       if (data.error) {
-        if (data.error === "PRIVATE_WISHLIST") {
-          setError("PRIVATE_WISHLIST");
-        } else if (data.error === "INVALID_STEAMID") {
-          setError("INVALID_STEAMID");
-        } else {
-          setError(data.error);
-        }
+        setError(data.error);
       } else {
         setResults(data);
       }
@@ -287,26 +281,42 @@ export default function Home() {
                   ウィッシュリストが非公開です
                 </p>
                 <p className="text-[#8ba3b5]">
-                  Steamの{" "}
+                  Steamのプロフィール設定 → 公開設定 → ゲームの詳細を「公開」にしてください。{" "}
                   <a
-                    href="https://store.steampowered.com/account/privacy"
+                    href="https://steamcommunity.com/my/edit/settings"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-[#1b9aff] hover:underline"
                   >
-                    プライバシー設定
-                  </a>{" "}
-                  でウィッシュリストを公開に設定してください。
+                    設定ページを開く
+                  </a>
                 </p>
               </>
             )}
-            {error === "INVALID_STEAMID" && (
+            {error === "EMPTY_WISHLIST" && (
               <p className="text-red-400">
-                SteamIDが見つかりません。正しいSteamID64またはプロフィールURLを入力してください。
+                ウィッシュリストにゲームが見つかりませんでした。
               </p>
             )}
-            {error !== "PRIVATE_WISHLIST" && error !== "INVALID_STEAMID" && (
-              <p className="text-red-400">エラーが発生しました: {error}</p>
+            {error === "INVALID_STEAMID" && (
+              <p className="text-red-400">
+                SteamIDが見つかりません。SteamID64（17桁の数字）またはプロフィールURLを入力してください。
+              </p>
+            )}
+            {error === "INVALID_API_KEY" && (
+              <p className="text-red-400">
+                サーバー設定エラーが発生しました。管理者にお問い合わせください。
+              </p>
+            )}
+            {error === "FETCH_ERROR" && (
+              <p className="text-red-400">
+                エラーが発生しました。しばらく時間をおいて再試行してください。
+              </p>
+            )}
+            {!["PRIVATE_WISHLIST", "EMPTY_WISHLIST", "INVALID_STEAMID", "INVALID_API_KEY", "FETCH_ERROR"].includes(error) && (
+              <p className="text-red-400">
+                エラーが発生しました。しばらく時間をおいて再試行してください。
+              </p>
             )}
           </div>
         )}
