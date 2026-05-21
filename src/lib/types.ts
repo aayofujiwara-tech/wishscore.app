@@ -15,6 +15,8 @@ export type GameResult = {
   hltbMainStory: number | null;
   hltbCompletionist: number | null;
   pricePerHour: number | null;
+  tags: string[];
+  tagMatchCount: number;
 };
 
 export type ApiResponse = {
