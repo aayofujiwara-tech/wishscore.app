@@ -28,20 +28,29 @@ async function fetchAllWishlistAppIds(steamId: string): Promise<number[]> {
 
   while (true) {
     const url = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${page}`;
+    console.log(`[WishScore] Fetching wishlist page ${page}: ${url}`);
     const res = await fetchWithRetry(url);
+
+    console.log(`[WishScore] Wishlist page ${page} response: status=${res.status}, content-type=${res.headers.get("content-type")}`);
 
     if (!res.ok) {
       throw new Error(`Wishlist fetch error: HTTP ${res.status}`);
     }
 
-    const data = (await res.json()) as Record<string, unknown>;
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+      console.log(`[WishScore] Non-JSON response from wishlist API (likely private or invalid SteamID)`);
+      throw new Error("PRIVATE_WISHLIST");
+    }
 
-    // Empty object means no more pages (or private wishlist signalled differently)
+    const data = (await res.json()) as Record<string, unknown>;
+    console.log(`[WishScore] Wishlist page ${page} keys: ${Object.keys(data).slice(0, 5).join(", ")}...`);
+
     if (!data || Object.keys(data).length === 0) {
       break;
     }
 
-    // Private wishlist returns { success: 2 } or similar
+    // Private wishlist returns { success: 2 }
     if ("success" in data && data.success === 2) {
       throw new Error("PRIVATE_WISHLIST");
     }
@@ -213,6 +222,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
   try {
     const { searchParams } = new URL(req.url);
     const steamIdParam = searchParams.get("steamid");
+    console.log(`[WishScore] GET /api/wishlist?steamid=${steamIdParam}`);
 
     if (!steamIdParam || steamIdParam.trim() === "") {
       return NextResponse.json(
@@ -222,14 +232,23 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
     }
 
     const apiKey = process.env.STEAM_API_KEY ?? "";
+    if (!apiKey) {
+      console.error("[WishScore] STEAM_API_KEY is not set");
+      return NextResponse.json(
+        { ...EMPTY_RESPONSE, error: "INVALID_API_KEY" },
+        { status: 500 }
+      );
+    }
 
     let steamId: string;
     try {
       steamId = await resolveToSteamId64(steamIdParam, apiKey);
+      console.log(`[WishScore] Resolved SteamID: ${steamId}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      console.error(`[WishScore] SteamID resolve error: ${message}`);
       return NextResponse.json(
-        { ...EMPTY_RESPONSE, error: message.includes("resolve") ? "INVALID_STEAMID" : message },
+        { ...EMPTY_RESPONSE, error: "INVALID_STEAMID" },
         { status: 400 }
       );
     }
@@ -237,8 +256,10 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
     let allAppIds: number[];
     try {
       allAppIds = await fetchAllWishlistAppIds(steamId);
+      console.log(`[WishScore] Total appids fetched: ${allAppIds.length}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      console.error(`[WishScore] Wishlist fetch error: ${message}`);
       if (message === "PRIVATE_WISHLIST") {
         return NextResponse.json(
           { ...EMPTY_RESPONSE, error: "PRIVATE_WISHLIST" },
@@ -252,7 +273,10 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse>> 
     }
 
     if (allAppIds.length === 0) {
-      return NextResponse.json(EMPTY_RESPONSE);
+      return NextResponse.json(
+        { ...EMPTY_RESPONSE, error: "EMPTY_WISHLIST" },
+        { status: 200 }
+      );
     }
 
     const BATCH_SIZE = 5;
