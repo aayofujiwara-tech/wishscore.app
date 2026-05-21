@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GameResult, ApiResponse } from "@/lib/types";
+import type { GameResult } from "@/lib/types";
 
 function scoreColor(score: number): string {
   if (score >= 10) return "#4ade80";
@@ -276,17 +276,45 @@ const PRESET_TAGS = [
   "ストラテジー", "スポーツ",
 ];
 
+type SseData = {
+  type: string;
+  message?: string;
+  current?: number;
+  total?: number;
+  game?: GameResult;
+  games?: GameResult[];
+  freeGames?: GameResult[];
+  unreleasedGames?: GameResult[];
+  totalCount?: number;
+  analyzedCount?: number;
+  error?: string;
+};
+
 export default function Home() {
   const [steamId, setSteamId] = useState("");
   const [savedId, setSavedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [weights, setWeights] = useState({ discount: 2.0, review: 1.0, price: 1.0 });
   const [showWeights, setShowWeights] = useState(false);
   const [favoriteTags, setFavoriteTags] = useState<string[]>([]);
   const [showTagPanel, setShowTagPanel] = useState(false);
   const [tagInput, setTagInput] = useState("");
+
+  // SSE streaming state
+  const [games, setGames] = useState<GameResult[]>([]);
+  const [freeGames, setFreeGames] = useState<GameResult[]>([]);
+  const [unreleasedGames, setUnreleasedGames] = useState<GameResult[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [analyzedCount, setAnalyzedCount] = useState(0);
+  const [isComplete, setIsComplete] = useState(false);
+  const [progressMessage, setProgressMessage] = useState("");
+  const [progressCurrent, setProgressCurrent] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+  const [streamingGames, setStreamingGames] = useState<GameResult[]>([]);
+
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const completedRef = useRef(false);
 
   useEffect(() => {
     const savedSteamId = localStorage.getItem("wishscore_steamid");
@@ -295,6 +323,9 @@ export default function Home() {
     if (savedTags) {
       try { setFavoriteTags(JSON.parse(savedTags) as string[]); } catch { /* ignore */ }
     }
+    return () => {
+      if (eventSourceRef.current) eventSourceRef.current.close();
+    };
   }, []);
 
   function clearSavedId() {
@@ -323,41 +354,87 @@ export default function Home() {
   }
 
   const rankedGames = useMemo(() => {
-    if (!results) return [];
-    return [...results.games]
+    const source = isComplete
+      ? games
+      : streamingGames.filter((g) => !g.isFree && !g.isUnreleased && g.priceJPY > 0);
+    return [...source]
       .map((g) => ({ ...g, score: recomputeScore(g, weights, favoriteTags) }))
       .sort((a, b) => b.score - a.score);
-  }, [results, weights, favoriteTags]);
+  }, [games, streamingGames, isComplete, weights, favoriteTags]);
 
-  async function handleAnalyze() {
+  function handleAnalyze() {
     if (!steamId.trim()) return;
+
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
     setLoading(true);
     setError(null);
-    setResults(null);
+    setGames([]);
+    setFreeGames([]);
+    setUnreleasedGames([]);
+    setStreamingGames([]);
+    setTotalCount(0);
+    setAnalyzedCount(0);
+    setIsComplete(false);
+    setProgressMessage("分析開始中...");
+    setProgressCurrent(0);
+    setProgressTotal(0);
+    completedRef.current = false;
 
-    try {
-      const params = new URLSearchParams({ steamid: steamId.trim() });
-      if (favoriteTags.length > 0) params.set("favoriteTags", favoriteTags.join(","));
-      const res = await fetch(`/api/wishlist?${params.toString()}`);
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!contentType.includes("application/json")) {
-        throw new Error(`API returned HTTP ${res.status}`);
-      }
-      const data = (await res.json()) as ApiResponse;
+    const params = new URLSearchParams({ steamid: steamId.trim() });
+    if (favoriteTags.length > 0) params.set("favoriteTags", favoriteTags.join(","));
 
-      if (data.error) {
-        setError(data.error);
-      } else {
-        setResults(data);
-        localStorage.setItem("wishscore_steamid", steamId.trim());
-        setSavedId(steamId.trim());
+    const es = new EventSource(`/api/wishlist?${params.toString()}`);
+    eventSourceRef.current = es;
+
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data as string) as SseData;
+
+        if (data.type === "progress") {
+          setProgressMessage(data.message ?? "");
+          setProgressCurrent(data.current ?? 0);
+          setProgressTotal(data.total ?? 0);
+        } else if (data.type === "game") {
+          if (data.game) setStreamingGames((prev) => [...prev, data.game!]);
+          setProgressCurrent(data.current ?? 0);
+          setProgressTotal(data.total ?? 0);
+        } else if (data.type === "complete") {
+          completedRef.current = true;
+          setGames(data.games ?? []);
+          setFreeGames(data.freeGames ?? []);
+          setUnreleasedGames(data.unreleasedGames ?? []);
+          setTotalCount(data.totalCount ?? 0);
+          setAnalyzedCount(data.analyzedCount ?? 0);
+          setIsComplete(true);
+          setLoading(false);
+          localStorage.setItem("wishscore_steamid", steamId.trim());
+          setSavedId(steamId.trim());
+          es.close();
+          eventSourceRef.current = null;
+        } else if (data.type === "error") {
+          setError(data.error ?? "SERVER_ERROR");
+          setLoading(false);
+          es.close();
+          eventSourceRef.current = null;
+        }
+      } catch { /* ignore parse errors */ }
+    };
+
+    es.onerror = () => {
+      if (!completedRef.current) {
+        setError("FETCH_ERROR");
+        setLoading(false);
       }
-    } catch {
-      setError("FETCH_ERROR");
-    } finally {
-      setLoading(false);
-    }
+      es.close();
+      eventSourceRef.current = null;
+    };
   }
+
+  const hasResults = isComplete || (loading && streamingGames.length > 0);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -388,7 +465,7 @@ export default function Home() {
               disabled={loading || !steamId.trim()}
               className="w-full sm:w-auto bg-[#1b9aff] hover:bg-[#1580d9] disabled:opacity-50 disabled:cursor-not-allowed text-white font-rajdhani font-semibold px-6 py-3 rounded-lg transition-colors text-sm"
             >
-              {loading ? "..." : "分析"}
+              {loading ? "分析中..." : "分析"}
             </button>
           </div>
           <div className="flex items-center justify-between mt-2 flex-wrap gap-1">
@@ -418,11 +495,28 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Loading */}
+        {/* Progress bar */}
         {loading && (
-          <div className="text-center py-12">
-            <div className="inline-block w-10 h-10 border-2 border-[#1b9aff] border-t-transparent rounded-full animate-spin mb-4" />
-            <p className="text-[#8ba3b5] text-sm">Analyzing your wishlist...</p>
+          <div className="mb-4">
+            {progressTotal > 0 ? (
+              <>
+                <div className="flex justify-between text-xs text-[#4a6b7c] mb-1.5">
+                  <span>{progressMessage}</span>
+                  <span>{progressCurrent} / {progressTotal}</span>
+                </div>
+                <div className="bg-[#2a475e] rounded-full h-1.5">
+                  <div
+                    className="h-1.5 rounded-full bg-[#1b9aff] transition-all duration-500"
+                    style={{ width: `${Math.round(progressCurrent / progressTotal * 100)}%` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-[#1b9aff] border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                <span className="text-xs text-[#8ba3b5]">{progressMessage || "読み込み中..."}</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -462,12 +556,7 @@ export default function Home() {
                 サーバー設定エラーが発生しました。管理者にお問い合わせください。
               </p>
             )}
-            {error === "FETCH_ERROR" && (
-              <p className="text-red-400">
-                エラーが発生しました。しばらく時間をおいて再試行してください。
-              </p>
-            )}
-            {!["PRIVATE_WISHLIST", "EMPTY_WISHLIST", "INVALID_STEAMID", "INVALID_API_KEY", "FETCH_ERROR"].includes(error) && (
+            {!["PRIVATE_WISHLIST", "EMPTY_WISHLIST", "INVALID_STEAMID", "INVALID_API_KEY"].includes(error) && (
               <p className="text-red-400">
                 エラーが発生しました。しばらく時間をおいて再試行してください。
               </p>
@@ -475,24 +564,28 @@ export default function Home() {
           </div>
         )}
 
-        {/* Results */}
-        {results && !loading && (
+        {/* Results (shown during streaming and after complete) */}
+        {hasResults && (
           <>
             <div className="flex items-center justify-between mb-3">
               <p className="text-[#8ba3b5] text-xs">
-                {results.totalCount}本のゲームを取得 ·{" "}
-                スコア対象: {results.games.length}本
+                {isComplete
+                  ? `${totalCount}本を取得 · 上位${analyzedCount}本を分析 · スコア対象: ${games.length}本`
+                  : `分析中... ${streamingGames.filter(g => !g.isFree && !g.isUnreleased).length}本処理済み`
+                }
               </p>
-              <button
-                onClick={() => setShowWeights((v) => !v)}
-                className="text-xs text-[#1b9aff] hover:underline"
-              >
-                {showWeights ? "▲ 重み調整を閉じる" : "▼ スコアの重みを調整"}
-              </button>
+              {isComplete && (
+                <button
+                  onClick={() => setShowWeights((v) => !v)}
+                  className="text-xs text-[#1b9aff] hover:underline"
+                >
+                  {showWeights ? "▲ 重み調整を閉じる" : "▼ スコアの重みを調整"}
+                </button>
+              )}
             </div>
 
-            {/* Weight panel */}
-            {showWeights && (
+            {/* Weight panel (only after complete) */}
+            {isComplete && showWeights && (
               <div className="rounded-xl border border-[#2a475e] bg-[#16202d] p-5 mb-4 space-y-3">
                 <p className="text-xs text-[#8ba3b5] mb-2">
                   スライダーを動かすとリアルタイムに順位が変わります
@@ -503,18 +596,20 @@ export default function Home() {
               </div>
             )}
 
-            {/* Tag panel toggle */}
-            <div className="flex justify-end mb-1">
-              <button
-                onClick={() => setShowTagPanel((v) => !v)}
-                className="text-xs text-[#1b9aff] hover:underline"
-              >
-                {showTagPanel ? "▲ タグ設定を閉じる" : "▼ 好みのタグを設定"}
-              </button>
-            </div>
+            {/* Tag panel toggle (only after complete) */}
+            {isComplete && (
+              <div className="flex justify-end mb-1">
+                <button
+                  onClick={() => setShowTagPanel((v) => !v)}
+                  className="text-xs text-[#1b9aff] hover:underline"
+                >
+                  {showTagPanel ? "▲ タグ設定を閉じる" : "▼ 好みのタグを設定"}
+                </button>
+              </div>
+            )}
 
             {/* Tag panel */}
-            {showTagPanel && (
+            {isComplete && showTagPanel && (
               <div className="rounded-xl border border-[#2a475e] bg-[#16202d] p-5 mb-4">
                 <p className="text-sm font-medium text-[#c7d5e0] mb-1">🏷️ 好みのタグを設定</p>
                 <p className="text-xs text-[#4a6b7c] mb-3">一致したタグはスコアにボーナス（+20%/個）が加算されます</p>
@@ -576,7 +671,7 @@ export default function Home() {
             {rankedGames.length > 0 && (
               <div className="space-y-2 mb-6">
                 <h2 className="font-rajdhani font-semibold text-[#1b9aff] text-lg tracking-wide mb-3">
-                  コスパランキング
+                  コスパランキング{loading ? "（分析中...）" : ""}
                 </h2>
                 {rankedGames.map((game, i) => (
                   <GameCard
@@ -592,14 +687,21 @@ export default function Home() {
               </div>
             )}
 
-            {/* Free games */}
-            {results.freeGames.length > 0 && (
+            {/* Spinner when no cards yet during loading */}
+            {loading && rankedGames.length === 0 && (
+              <div className="text-center py-8">
+                <div className="inline-block w-8 h-8 border-2 border-[#1b9aff] border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+
+            {/* Free games (after complete) */}
+            {isComplete && freeGames.length > 0 && (
               <div className="mb-6">
                 <h2 className="font-rajdhani font-semibold text-[#22c55e] text-lg tracking-wide mb-3">
                   無料ゲーム（好評率順）
                 </h2>
                 <div className="space-y-2">
-                  {results.freeGames.map((game) => (
+                  {freeGames.map((game) => (
                     <a
                       key={game.appid}
                       href={`https://store.steampowered.com/app/${game.appid}`}
@@ -629,14 +731,14 @@ export default function Home() {
               </div>
             )}
 
-            {/* Unreleased games */}
-            {results.unreleasedGames.length > 0 && (
+            {/* Unreleased games (after complete) */}
+            {isComplete && unreleasedGames.length > 0 && (
               <div className="mb-6">
                 <h2 className="font-rajdhani font-semibold text-[#8ba3b5] text-lg tracking-wide mb-3">
                   未発売ゲーム
                 </h2>
                 <div className="space-y-2">
-                  {results.unreleasedGames.map((game) => (
+                  {unreleasedGames.map((game) => (
                     <a
                       key={game.appid}
                       href={`https://store.steampowered.com/app/${game.appid}`}
@@ -656,6 +758,19 @@ export default function Home() {
                     </a>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* "Load more" placeholder (after complete) */}
+            {isComplete && (
+              <div className="text-center mt-2 mb-4">
+                <button
+                  disabled
+                  className="text-sm text-[#4a6b7c] border border-[#2a475e] rounded-lg px-5 py-2 opacity-50 cursor-not-allowed"
+                  title="近日対応予定"
+                >
+                  さらに20件分析する（近日対応）
+                </button>
               </div>
             )}
           </>
