@@ -31,20 +31,31 @@ async function fetchAllWishlistAppIds(steamId: string): Promise<number[]> {
     console.log(`[WishScore] Fetching wishlist page ${page}: ${url}`);
     const res = await fetchWithRetry(url);
 
-    console.log(`[WishScore] Wishlist page ${page} response: status=${res.status}, content-type=${res.headers.get("content-type")}`);
+    const contentType = res.headers.get("content-type") ?? "";
+    console.log(`[WishScore] Page ${page}: status=${res.status}, content-type=${contentType}`);
 
     if (!res.ok) {
       throw new Error(`Wishlist fetch error: HTTP ${res.status}`);
     }
 
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!contentType.includes("application/json")) {
-      console.log(`[WishScore] Non-JSON response from wishlist API (likely private or invalid SteamID)`);
+    const bodyText = await res.text();
+    console.log(`[WishScore] Page ${page} body (first 200 chars): ${bodyText.slice(0, 200)}`);
+
+    // If body starts with HTML, it's a private/invalid wishlist
+    if (bodyText.trimStart().startsWith("<")) {
+      console.log(`[WishScore] HTML response detected — private or invalid SteamID`);
       throw new Error("PRIVATE_WISHLIST");
     }
 
-    const data = (await res.json()) as Record<string, unknown>;
-    console.log(`[WishScore] Wishlist page ${page} keys: ${Object.keys(data).slice(0, 5).join(", ")}...`);
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(bodyText) as Record<string, unknown>;
+    } catch (e) {
+      console.error(`[WishScore] Failed to parse JSON: ${e}`);
+      throw new Error("PRIVATE_WISHLIST");
+    }
+
+    console.log(`[WishScore] Page ${page} keys: ${Object.keys(data).slice(0, 5).join(", ")}`);
 
     if (!data || Object.keys(data).length === 0) {
       break;
