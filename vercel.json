@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "src/app/api/wishlist/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
