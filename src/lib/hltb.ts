@@ -12,6 +12,16 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 5
   }
 }
 
+function extractApiKey(scriptText: string): string | null {
+  const pattern1 = scriptText.match(/\/api\/search\/([a-zA-Z0-9]+)/);
+  const pattern2 = scriptText.match(/"api\/search\/([a-zA-Z0-9]+)"/);
+  const pattern3 = scriptText.match(/fetch\(["']\/api\/search\/([a-zA-Z0-9]+)["']\)/);
+  const pattern4 = scriptText.match(/path:\s*["']\/api\/search\/([a-zA-Z0-9]+)["']/);
+  const pattern5 = scriptText.match(/searchKey\s*=\s*["']([a-zA-Z0-9]+)["']/);
+  const match = pattern1 || pattern2 || pattern3 || pattern4 || pattern5;
+  return match ? match[1] : null;
+}
+
 async function fetchHltbApiKey(): Promise<string | null> {
   if (cachedApiKey !== undefined) return cachedApiKey;
 
@@ -29,19 +39,26 @@ async function fetchHltbApiKey(): Promise<string | null> {
     console.log(`[WishScore] HLTB scripts found: ${scriptMatches?.length ?? 0}`);
 
     if (scriptMatches) {
-      for (const scriptPath of scriptMatches.slice(0, 5)) {
-        const scriptRes = await fetchWithTimeout(`https://howlongtobeat.com${scriptPath}`, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://howlongtobeat.com/",
-          },
-        });
-        const scriptText = await scriptRes.text();
-        const keyMatch = scriptText.match(/\/api\/search\/([a-zA-Z0-9]+)/);
-        if (keyMatch) {
-          cachedApiKey = keyMatch[1];
-          console.log(`[WishScore] HLTB: APIキー取得成功 → ${cachedApiKey}`);
-          return cachedApiKey;
+      for (const scriptPath of scriptMatches.slice(0, 15)) {
+        console.log(`[WishScore] HLTB checking script: ${scriptPath}`);
+        try {
+          const scriptRes = await fetchWithTimeout(`https://howlongtobeat.com${scriptPath}`, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Referer": "https://howlongtobeat.com/",
+            },
+          });
+          const scriptText = await scriptRes.text();
+          console.log(`[WishScore] HLTB script length: ${scriptText.length}`);
+          const key = extractApiKey(scriptText);
+          if (key) {
+            cachedApiKey = key;
+            console.log(`[WishScore] HLTB: APIキー取得成功 → ${cachedApiKey}`);
+            return cachedApiKey;
+          }
+        } catch (e) {
+          console.log(`[WishScore] HLTB script fetch error: ${e}`);
+          continue;
         }
       }
     }
