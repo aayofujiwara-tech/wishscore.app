@@ -182,6 +182,7 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
   let tags: string[] = [];
 
   if (!isFree && !isUnreleased && priceJPY > 0) {
+    console.log(`[WishScore] Step2 detail: ${name} (¥${priceJPY})`);
     const [hltb, fetchedTags] = await Promise.all([
       getHLTBData(name),
       getSteamSpyTags(appid),
