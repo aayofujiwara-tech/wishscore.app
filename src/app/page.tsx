@@ -289,6 +289,17 @@ type SseData = {
   error?: string;
 };
 
+type CacheData = {
+  steamId: string;
+  games: GameResult[];
+  freeGames: GameResult[];
+  unreleasedGames: GameResult[];
+  allScoredGames: GameResult[];
+  totalCount: number;
+  analyzedCount: number;
+  analyzedAt: number;
+};
+
 export default function Home() {
   const [steamId, setSteamId] = useState("");
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -318,25 +329,81 @@ export default function Home() {
   const [loadMoreCurrent, setLoadMoreCurrent] = useState(0);
   const [loadMoreTotal, setLoadMoreTotal] = useState(0);
 
+  // Cache state
+  const [showCacheNotice, setShowCacheNotice] = useState(false);
+  const [cacheAge, setCacheAge] = useState(0);
+  const [diffNotice, setDiffNotice] = useState<string | null>(null);
+
   const eventSourceRef = useRef<EventSource | null>(null);
   const completedRef = useRef(false);
   const loadMoreEsRef = useRef<EventSource | null>(null);
   const loadMoreCompletedRef = useRef(false);
+  const allScoredGamesRef = useRef<GameResult[]>([]);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
-    // URL param takes priority (e.g. coming from a share page link)
+    isMountedRef.current = true;
+
     const urlSteamId = new URLSearchParams(window.location.search).get("steamid");
     if (urlSteamId) {
       setSteamId(urlSteamId);
     } else {
       const savedSteamId = localStorage.getItem("wishscore_steamid");
-      if (savedSteamId) { setSteamId(savedSteamId); setSavedId(savedSteamId); }
+      if (savedSteamId) {
+        setSteamId(savedSteamId);
+        setSavedId(savedSteamId);
+
+        // Restore cache if fresh enough
+        try {
+          const cacheStr = localStorage.getItem(`wishscore_cache_${savedSteamId}`);
+          if (cacheStr) {
+            const cached = JSON.parse(cacheStr) as CacheData;
+            const ageMinutes = Math.round((Date.now() - cached.analyzedAt) / 60000);
+            if (ageMinutes < 60) {
+              setGames(cached.games ?? []);
+              setFreeGames(cached.freeGames ?? []);
+              setUnreleasedGames(cached.unreleasedGames ?? []);
+              setAllScoredGames(cached.allScoredGames ?? []);
+              allScoredGamesRef.current = cached.allScoredGames ?? [];
+              setTotalCount(cached.totalCount ?? 0);
+              setAnalyzedCount(cached.analyzedCount ?? 0);
+              setIsComplete(true);
+              setCacheAge(ageMinutes);
+              setShowCacheNotice(true);
+
+              // Background diff check
+              const cachedIds = new Set((cached.allScoredGames ?? []).map((g) => g.appid));
+              fetch(`/api/wishlist?mode=check&steamid=${encodeURIComponent(savedSteamId)}`)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((result: { appids?: number[] } | null) => {
+                  if (!result?.appids || !isMountedRef.current) return;
+                  const newSet = new Set(result.appids);
+                  const added = result.appids.filter((id) => !cachedIds.has(id));
+                  const removed = [...cachedIds].filter((id) => !newSet.has(id));
+                  if (removed.length > 0) {
+                    setGames((prev) => prev.filter((g) => newSet.has(g.appid)));
+                    setFreeGames((prev) => prev.filter((g) => newSet.has(g.appid)));
+                    setUnreleasedGames((prev) => prev.filter((g) => newSet.has(g.appid)));
+                    setAllScoredGames((prev) => prev.filter((g) => newSet.has(g.appid)));
+                  }
+                  if (added.length > 0 && isMountedRef.current) {
+                    setDiffNotice(`${added.length}件のゲームがウィッシュリストに追加されています。`);
+                  }
+                })
+                .catch(() => { /* background check — ignore errors */ });
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
     }
+
     const savedTags = localStorage.getItem("wishscore_favorite_tags");
     if (savedTags) {
       try { setFavoriteTags(JSON.parse(savedTags) as string[]); } catch { /* ignore */ }
     }
+
     return () => {
+      isMountedRef.current = false;
       if (eventSourceRef.current) eventSourceRef.current.close();
       if (loadMoreEsRef.current) loadMoreEsRef.current.close();
     };
@@ -396,10 +463,13 @@ export default function Home() {
     setFreeGames([]);
     setUnreleasedGames([]);
     setAllScoredGames([]);
+    allScoredGamesRef.current = [];
     setStreamingGames([]);
     setTotalCount(0);
     setAnalyzedCount(0);
     setIsComplete(false);
+    setShowCacheNotice(false);
+    setDiffNotice(null);
     setProgressMessage("分析開始中...");
     setProgressCurrent(0);
     setProgressTotal(0);
@@ -420,7 +490,8 @@ export default function Home() {
           setProgressCurrent(data.current ?? 0);
           setProgressTotal(data.total ?? 0);
         } else if (data.type === "allScores") {
-          setAllScoredGames(data.games ?? []);
+          allScoredGamesRef.current = data.games ?? [];
+          setAllScoredGames(allScoredGamesRef.current);
           setTotalCount(data.totalCount ?? 0);
         } else if (data.type === "game") {
           if (data.game) setStreamingGames((prev) => [...prev, data.game!]);
@@ -437,6 +508,20 @@ export default function Home() {
           setLoading(false);
           localStorage.setItem("wishscore_steamid", steamId.trim());
           setSavedId(steamId.trim());
+          // Save analysis cache for instant display on next visit
+          try {
+            const cacheData: CacheData = {
+              steamId: steamId.trim(),
+              games: data.games ?? [],
+              freeGames: data.freeGames ?? [],
+              unreleasedGames: data.unreleasedGames ?? [],
+              allScoredGames: allScoredGamesRef.current,
+              totalCount: data.totalCount ?? 0,
+              analyzedCount: data.analyzedCount ?? 0,
+              analyzedAt: Date.now(),
+            };
+            localStorage.setItem(`wishscore_cache_${steamId.trim()}`, JSON.stringify(cacheData));
+          } catch { /* quota exceeded — skip cache */ }
           es.close();
           eventSourceRef.current = null;
         } else if (data.type === "error") {
@@ -670,6 +755,30 @@ export default function Home() {
         {/* Results (shown during streaming and after complete) */}
         {hasResults && (
           <>
+            {/* Cache notice */}
+            {showCacheNotice && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-[#2a475e] bg-[#1b2838] px-4 py-2.5 mb-3 text-xs text-[#8ba3b5]">
+                <span>⚡ 前回の分析結果を表示中（{cacheAge}分前）</span>
+                <button
+                  onClick={handleAnalyze}
+                  className="text-[#1b9aff] hover:underline whitespace-nowrap flex-shrink-0"
+                >
+                  最新データに更新する
+                </button>
+              </div>
+            )}
+            {/* Diff notice */}
+            {diffNotice && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-[#1b9aff]/30 bg-[#1b2838] px-4 py-2.5 mb-3 text-xs text-[#c7d5e0]">
+                <span>ℹ️ {diffNotice}</span>
+                <button
+                  onClick={handleAnalyze}
+                  className="text-[#1b9aff] hover:underline whitespace-nowrap flex-shrink-0"
+                >
+                  更新する
+                </button>
+              </div>
+            )}
             <div className="flex items-center justify-between mb-3">
               <p className="text-[#8ba3b5] text-xs">
                 {isComplete

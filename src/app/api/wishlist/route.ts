@@ -10,7 +10,7 @@ export const maxDuration = 60;
 const RETRY_LIMIT = 3;
 const RETRY_INTERVAL_MS = 500;
 const DETAIL_LIMIT = 20;
-const BATCH_SIZE = 10;
+const BATCH_SIZE = 25;
 
 async function fetchWithRetry(
   url: string,
@@ -150,12 +150,11 @@ async function processGameFast(appid: number): Promise<GameResult | null> {
   };
 }
 
-// Step 2: full detail — appdetails + reviews + HLTB + SteamSpy
+// Step 2: full detail — appdetails + reviews, then HLTB + SteamSpy in parallel
 async function processGame(appid: number, favoriteTags: string[]): Promise<GameResult | null> {
-  const [details, reviews, tags] = await Promise.all([
+  const [details, reviews] = await Promise.all([
     fetchAppDetails(appid),
     fetchReviews(appid),
-    getSteamSpyTags(appid),
   ]);
 
   if (!details?.success || !details.data) return null;
@@ -180,9 +179,14 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
   let hltbMainStory: number | null = null;
   let hltbCompletionist: number | null = null;
   let pricePerHour: number | null = null;
+  let tags: string[] = [];
 
   if (!isFree && !isUnreleased && priceJPY > 0) {
-    const hltb = await getHLTBData(name);
+    const [hltb, fetchedTags] = await Promise.all([
+      getHLTBData(name),
+      getSteamSpyTags(appid),
+    ]);
+    tags = fetchedTags;
     if (hltb) {
       hltbMainStory = hltb.mainStory;
       hltbCompletionist = hltb.completionist;
@@ -213,6 +217,26 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
 }
 
 export async function GET(req: NextRequest): Promise<Response> {
+  const { searchParams } = new URL(req.url);
+  const mode = searchParams.get("mode") ?? "full";
+
+  // Lightweight JSON endpoint: returns wishlist appids for cache diff check
+  if (mode === "check") {
+    const steamIdParam = searchParams.get("steamid") ?? "";
+    const apiKey = process.env.STEAM_API_KEY ?? "";
+    if (!steamIdParam.trim() || !apiKey) {
+      return Response.json({ error: "INVALID_PARAMS" }, { status: 400 });
+    }
+    try {
+      const steamId = await resolveToSteamId64(steamIdParam, apiKey);
+      const appids = await fetchAllWishlistAppIds(steamId, apiKey);
+      return Response.json({ appids });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "SERVER_ERROR";
+      return Response.json({ error: msg }, { status: 500 });
+    }
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -224,8 +248,6 @@ export async function GET(req: NextRequest): Promise<Response> {
       };
 
       try {
-        const { searchParams } = new URL(req.url);
-        const mode = searchParams.get("mode") ?? "full";
         const favoriteTagsParam = searchParams.get("favoriteTags") ?? "";
         const favoriteTags = favoriteTagsParam
           ? favoriteTagsParam.split(",").map((t) => t.trim()).filter(Boolean)
