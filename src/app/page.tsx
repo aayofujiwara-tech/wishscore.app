@@ -26,12 +26,11 @@ function recomputeScore(
   const discountBoost = Math.pow(1 + g.discountPercent / 100, weights.discount);
   const priceFactor = Math.pow(g.priceJPY, weights.price);
   const base = (g.positiveRate * reviewWeight * discountBoost * weights.review / priceFactor) * 1000;
-  const hltbBonus = g.pricePerHour ? Math.max(1.0, 20 / g.pricePerHour) : 1.0;
   const matchCount = favoriteTags.length > 0
     ? g.tags.filter((t) => favoriteTags.includes(t)).length
     : 0;
   const tagBonus = Math.min(2.0, 1 + matchCount * 0.2);
-  return base * hltbBonus * tagBonus;
+  return base * tagBonus;
 }
 
 function GameCard({
@@ -197,15 +196,6 @@ function GameCard({
             </div>
           )}
         </div>
-
-        {game.medianPlaytime && (
-          <div className="flex items-center gap-1.5 mt-1 text-sm text-[#94a3b8]">
-            <span>🕐 約{game.medianPlaytime}時間（中央値）</span>
-            {game.pricePerHour !== null && (
-              <span>・ ¥{game.pricePerHour.toLocaleString()}/時間</span>
-            )}
-          </div>
-        )}
 
         {game.tags.length > 0 && (
           <div className="flex items-center gap-1 mt-1 flex-wrap">
