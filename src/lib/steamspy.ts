@@ -5,7 +5,7 @@ type SteamSpyResponse = {
 
 export type SteamSpyData = {
   tags: string[];
-  medianPlaytimeHours: number | null;
+  medianPlaytime: number | null; // hours
 };
 
 export async function getSteamSpyData(appid: number): Promise<SteamSpyData> {
@@ -13,21 +13,29 @@ export async function getSteamSpyData(appid: number): Promise<SteamSpyData> {
     const res = await fetch(
       `https://steamspy.com/api.php?request=appdetails&appid=${appid}`
     );
-    if (!res.ok) return { tags: [], medianPlaytimeHours: null };
+    if (!res.ok) return { tags: [], medianPlaytime: null };
     const data = (await res.json()) as SteamSpyResponse;
     const tags = data.tags ? Object.keys(data.tags).slice(0, 10) : [];
     const medianMinutes = data.median_forever ?? 0;
-    const medianPlaytimeHours = medianMinutes > 0
-      ? Math.round(medianMinutes / 60)
-      : null;
-    return { tags, medianPlaytimeHours };
+    const medianPlaytime = medianMinutes > 0 ? Math.round(medianMinutes / 60) : null;
+    return { tags, medianPlaytime };
   } catch {
-    return { tags: [], medianPlaytimeHours: null };
+    return { tags: [], medianPlaytime: null };
   }
 }
 
-// Backward-compatible wrapper
-export async function getSteamSpyTags(appid: number): Promise<string[]> {
-  const { tags } = await getSteamSpyData(appid);
-  return tags;
+export async function getSteamSpyPlaytime(appid: number): Promise<{
+  medianPlaytime: number | null; // hours
+} | null> {
+  try {
+    const res = await fetch(
+      `https://steamspy.com/api.php?request=appdetails&appid=${appid}`
+    );
+    const data = (await res.json()) as SteamSpyResponse;
+    const medianMinutes = data.median_forever ?? 0;
+    const medianPlaytime = medianMinutes > 0 ? Math.round(medianMinutes / 60) : null;
+    return { medianPlaytime };
+  } catch {
+    return null;
+  }
 }

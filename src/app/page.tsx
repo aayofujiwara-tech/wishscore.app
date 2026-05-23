@@ -198,9 +198,9 @@ function GameCard({
           )}
         </div>
 
-        {game.hltbMainStory && (
+        {game.medianPlaytime && (
           <div className="flex items-center gap-1.5 mt-1 text-sm text-[#94a3b8]">
-            <span>🕐 約{game.hltbMainStory}時間</span>
+            <span>🕐 約{game.medianPlaytime}時間（中央値）</span>
             {game.pricePerHour !== null && (
               <span>・ ¥{game.pricePerHour.toLocaleString()}/時間</span>
             )}
