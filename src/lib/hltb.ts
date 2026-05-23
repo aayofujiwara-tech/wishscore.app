@@ -1,7 +1,29 @@
-// Module-level cache so API key is fetched only once per server lifecycle
-let cachedApiKey: string | null | undefined = undefined;
+const HLTB_BASE = "https://howlongtobeat.com";
+const SEARCH_URL = `${HLTB_BASE}/api/find`;
+const INIT_URL = `${HLTB_BASE}/api/find/init`;
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 5000): Promise<Response> {
+const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "accept-language": "en-US,en;q=0.9",
+  "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "sec-fetch-dest": "empty",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-site": "same-origin",
+};
+
+type InitData = {
+  token: string;
+  hpKey: string | null;
+  hpVal: string | null;
+  fetchedAt: number;
+};
+
+// Cache token for 5 minutes so 20 sequential game lookups share one init call
+let cachedInit: InitData | null = null;
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 8000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -12,63 +34,41 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 5
   }
 }
 
-function extractApiKey(scriptText: string): string | null {
-  const pattern1 = scriptText.match(/\/api\/search\/([a-zA-Z0-9]+)/);
-  const pattern2 = scriptText.match(/"api\/search\/([a-zA-Z0-9]+)"/);
-  const pattern3 = scriptText.match(/fetch\(["']\/api\/search\/([a-zA-Z0-9]+)["']\)/);
-  const pattern4 = scriptText.match(/path:\s*["']\/api\/search\/([a-zA-Z0-9]+)["']/);
-  const pattern5 = scriptText.match(/searchKey\s*=\s*["']([a-zA-Z0-9]+)["']/);
-  const match = pattern1 || pattern2 || pattern3 || pattern4 || pattern5;
-  return match ? match[1] : null;
-}
-
-async function fetchHltbApiKey(): Promise<string | null> {
-  if (cachedApiKey !== undefined) return cachedApiKey;
-
-  try {
-    const homeRes = await fetchWithTimeout("https://howlongtobeat.com", {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-    });
-    console.log(`[WishScore] HLTB home status: ${homeRes.status}`);
-
-    const html = await homeRes.text();
-    const scriptMatches = html.match(/\/_next\/static\/chunks\/[^"]+\.js/g);
-    console.log(`[WishScore] HLTB scripts found: ${scriptMatches?.length ?? 0}`);
-
-    if (scriptMatches) {
-      for (const scriptPath of scriptMatches.slice(0, 15)) {
-        console.log(`[WishScore] HLTB checking script: ${scriptPath}`);
-        try {
-          const scriptRes = await fetchWithTimeout(`https://howlongtobeat.com${scriptPath}`, {
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-              "Referer": "https://howlongtobeat.com/",
-            },
-          });
-          const scriptText = await scriptRes.text();
-          console.log(`[WishScore] HLTB script length: ${scriptText.length}`);
-          const key = extractApiKey(scriptText);
-          if (key) {
-            cachedApiKey = key;
-            console.log(`[WishScore] HLTB: APIキー取得成功 → ${cachedApiKey}`);
-            return cachedApiKey;
-          }
-        } catch (e) {
-          console.log(`[WishScore] HLTB script fetch error: ${e}`);
-          continue;
-        }
-      }
-    }
-  } catch (e) {
-    console.log(`[WishScore] HLTB: APIキー取得中にエラー → ${e}`);
+async function getInitData(): Promise<InitData | null> {
+  if (cachedInit && Date.now() - cachedInit.fetchedAt < 5 * 60 * 1000) {
+    return cachedInit;
   }
 
-  console.log(`[WishScore] HLTB: APIキー取得失敗`);
-  cachedApiKey = null;
-  return null;
+  try {
+    const initRes = await fetchWithTimeout(`${INIT_URL}?t=${Date.now()}`, {
+      headers: {
+        ...BROWSER_HEADERS,
+        referer: `${HLTB_BASE}/`,
+        accept: "*/*",
+      },
+    });
+    console.log(`[WishScore] HLTB init status: ${initRes.status}`);
+
+    if (!initRes.ok) return null;
+
+    const data = await initRes.json() as { token?: string; hpKey?: string; hpVal?: string };
+    if (!data.token) {
+      console.log(`[WishScore] HLTB init: no token in response`);
+      return null;
+    }
+
+    console.log(`[WishScore] HLTB init success, token: ${data.token.substring(0, 8)}...`);
+    cachedInit = {
+      token: data.token,
+      hpKey: data.hpKey ?? null,
+      hpVal: data.hpVal ?? null,
+      fetchedAt: Date.now(),
+    };
+    return cachedInit;
+  } catch (e) {
+    console.log(`[WishScore] HLTB init error: ${e}`);
+    return null;
+  }
 }
 
 export async function getHLTBData(gameName: string): Promise<{
@@ -78,48 +78,65 @@ export async function getHLTBData(gameName: string): Promise<{
   try {
     console.log(`[WishScore] HLTB fetching: ${gameName}`);
 
-    const apiKey = await fetchHltbApiKey();
-    console.log(`[WishScore] HLTB apiKey: ${apiKey}`);
-    if (!apiKey) return null;
+    const initData = await getInitData();
+    if (!initData) {
+      console.log(`[WishScore] HLTB: init failed for ${gameName}`);
+      return null;
+    }
 
-    const searchRes = await fetchWithTimeout(
-      `https://howlongtobeat.com/api/search/${apiKey}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          "Referer": "https://howlongtobeat.com/",
-          "Origin": "https://howlongtobeat.com",
+    const payload: Record<string, unknown> = {
+      searchType: "games",
+      searchTerms: gameName.split(" "),
+      searchPage: 1,
+      size: 5,
+      searchOptions: {
+        games: {
+          userId: 0,
+          platform: "",
+          sortCategory: "popular",
+          rangeCategory: "main",
+          rangeTime: { min: null, max: null },
+          gameplay: { perspective: "", flow: "", genre: "", difficulty: "" },
+          rangeYear: { min: "", max: "" },
+          modifier: "",
         },
-        body: JSON.stringify({
-          searchType: "games",
-          searchTerms: gameName.split(" "),
-          searchPage: 1,
-          size: 5,
-          searchOptions: {
-            games: {
-              userId: 0,
-              platform: "",
-              sortCategory: "popular",
-              rangeCategory: "main",
-              rangeTime: { min: null, max: null },
-              gameplay: { perspective: "", flow: "", genre: "" },
-              rangeYear: { min: "", max: "" },
-              modifier: "",
-            },
-            users: { sortCategory: "postcount" },
-            lists: { sortCategory: "follows" },
-            filter: "",
-            sort: 0,
-            randomizer: 0,
-          },
-        }),
-      }
-    );
+        users: { sortCategory: "postcount" },
+        lists: { sortCategory: "follows" },
+        filter: "",
+        sort: 0,
+        randomizer: 0,
+      },
+      useCache: true,
+    };
+
+    // Include honeypot field if provided
+    if (initData.hpKey && initData.hpVal) {
+      payload[initData.hpKey] = initData.hpVal;
+    }
+
+    const searchReferer = `${HLTB_BASE}/?q=${encodeURIComponent(gameName)}`;
+    const headers: Record<string, string> = {
+      ...BROWSER_HEADERS,
+      "content-type": "application/json",
+      accept: "*/*",
+      origin: HLTB_BASE,
+      referer: searchReferer,
+      "x-auth-token": initData.token,
+    };
+    if (initData.hpKey) headers["x-hp-key"] = initData.hpKey;
+
+    const searchRes = await fetchWithTimeout(SEARCH_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
     console.log(`[WishScore] HLTB search status: ${searchRes.status}`);
 
-    if (!searchRes.ok) return null;
+    if (!searchRes.ok) {
+      // Token may have expired — clear cache so next call re-initializes
+      if (searchRes.status === 401 || searchRes.status === 403) cachedInit = null;
+      return null;
+    }
 
     const data = await searchRes.json() as { data?: { comp_main?: number; comp_plus?: number }[] };
     const results = data?.data;
