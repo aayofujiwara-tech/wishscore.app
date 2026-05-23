@@ -358,8 +358,14 @@ export default function Home() {
           const cacheStr = localStorage.getItem(`wishscore_cache_${savedSteamId}`);
           if (cacheStr) {
             const cached = JSON.parse(cacheStr) as CacheData;
+            // Invalidate cache if schema changed (hltbMainStory → medianPlaytime)
+            const firstGame = cached.games?.[0] as Record<string, unknown> | undefined;
+            const isOldSchema = firstGame != null && "hltbMainStory" in firstGame;
+            if (isOldSchema) {
+              localStorage.removeItem(`wishscore_cache_${savedSteamId}`);
+            }
             const ageMinutes = Math.round((Date.now() - cached.analyzedAt) / 60000);
-            if (ageMinutes < 60) {
+            if (!isOldSchema && ageMinutes < 60) {
               setGames(cached.games ?? []);
               setFreeGames(cached.freeGames ?? []);
               setUnreleasedGames(cached.unreleasedGames ?? []);

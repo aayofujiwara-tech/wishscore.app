@@ -186,6 +186,7 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
       medianPlaytime = spyData.medianPlaytime;
       pricePerHour = Math.round(priceJPY / spyData.medianPlaytime);
     }
+    console.log(`[WishScore] Playtime: ${appid} → ${medianPlaytime}h`);
   }
 
   const playtimeBonus = pricePerHour ? Math.max(1.0, 20 / pricePerHour) : 1.0;
