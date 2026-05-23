@@ -12,6 +12,9 @@ export type GameResult = {
   isUnreleased: boolean;
   shortDescription: string;
   genres: string[];
+  hltbMainStory: number | null;
+  hltbCompletionist: number | null;
+  pricePerHour: number | null;
   tags: string[];
   tagMatchCount: number;
 };

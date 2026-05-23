@@ -26,11 +26,12 @@ function recomputeScore(
   const discountBoost = Math.pow(1 + g.discountPercent / 100, weights.discount);
   const priceFactor = Math.pow(g.priceJPY, weights.price);
   const base = (g.positiveRate * reviewWeight * discountBoost * weights.review / priceFactor) * 1000;
+  const hltbBonus = g.pricePerHour ? Math.max(1.0, 20 / g.pricePerHour) : 1.0;
   const matchCount = favoriteTags.length > 0
     ? g.tags.filter((t) => favoriteTags.includes(t)).length
     : 0;
   const tagBonus = Math.min(2.0, 1 + matchCount * 0.2);
-  return base * tagBonus;
+  return base * hltbBonus * tagBonus;
 }
 
 function GameCard({
@@ -197,6 +198,15 @@ function GameCard({
           )}
         </div>
 
+        {game.hltbMainStory && (
+          <div className="flex items-center gap-1.5 mt-1 text-xs text-[#94a3b8]">
+            <span>🕐 約{game.hltbMainStory.toFixed(0)}時間</span>
+            {game.pricePerHour !== null && (
+              <span>・ ¥{game.pricePerHour.toLocaleString()}/時間</span>
+            )}
+          </div>
+        )}
+
         {game.tags.length > 0 && (
           <div className="flex items-center gap-1 mt-1 flex-wrap">
             {matchCount > 0 && (
@@ -349,13 +359,8 @@ export default function Home() {
           if (cacheStr) {
             const cached = JSON.parse(cacheStr) as CacheData;
             // Invalidate cache if schema changed (hltbMainStory → medianPlaytime)
-            const firstGame = cached.games?.[0] as Record<string, unknown> | undefined;
-            const isOldSchema = firstGame != null && "hltbMainStory" in firstGame;
-            if (isOldSchema) {
-              localStorage.removeItem(`wishscore_cache_${savedSteamId}`);
-            }
             const ageMinutes = Math.round((Date.now() - cached.analyzedAt) / 60000);
-            if (!isOldSchema && ageMinutes < 60) {
+            if (ageMinutes < 60) {
               setGames(cached.games ?? []);
               setFreeGames(cached.freeGames ?? []);
               setUnreleasedGames(cached.unreleasedGames ?? []);

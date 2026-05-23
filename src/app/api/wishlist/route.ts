@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { resolveToSteamId64 } from "@/lib/steamUtils";
+import { getHLTBData } from "@/lib/hltb";
 import { getSteamSpyTags } from "@/lib/steamspy";
 import type { GameResult } from "@/lib/types";
 
@@ -102,10 +103,11 @@ function calculateScore(
   reviewTotal: number,
   discountPercent: number,
   priceJPY: number,
+  hltbBonus = 1.0,
 ): number {
   const reviewWeight = Math.log10(reviewTotal + 1);
   const discountBoost = Math.pow(1 + discountPercent / 100, 2);
-  return (positiveRate * reviewWeight * discountBoost / priceJPY) * 1000;
+  return (positiveRate * reviewWeight * discountBoost / priceJPY) * 1000 * hltbBonus;
 }
 
 // Step 1: fast scan — appdetails + reviews only, no HLTB, no SteamSpy
@@ -143,16 +145,16 @@ async function processGameFast(appid: number): Promise<GameResult | null> {
     appid, name, headerImage, priceJPY, originalPriceJPY, discountPercent,
     positiveRate, reviewTotal: total, score, isFree, isUnreleased,
     shortDescription, genres,
+    hltbMainStory: null, hltbCompletionist: null, pricePerHour: null,
     tags: [], tagMatchCount: 0,
   };
 }
 
-// Step 2: full detail — appdetails + reviews + SteamSpy tags
+// Step 2: full detail — appdetails + reviews + HLTB + SteamSpy tags
 async function processGame(appid: number, favoriteTags: string[]): Promise<GameResult | null> {
-  const [details, reviews, tags] = await Promise.all([
+  const [details, reviews] = await Promise.all([
     fetchAppDetails(appid),
     fetchReviews(appid),
-    getSteamSpyTags(appid),
   ]);
 
   if (!details?.success || !details.data) return null;
@@ -174,6 +176,25 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
   const { positive, negative, total } = reviews;
   const positiveRate = total > 0 ? positive / (positive + negative) : 0;
 
+  let hltbMainStory: number | null = null;
+  let hltbCompletionist: number | null = null;
+  let pricePerHour: number | null = null;
+  let tags: string[] = [];
+
+  if (!isFree && !isUnreleased && priceJPY > 0) {
+    const [hltbData, fetchedTags] = await Promise.all([
+      getHLTBData(appid),
+      getSteamSpyTags(appid),
+    ]);
+    tags = fetchedTags;
+    if (hltbData) {
+      hltbMainStory = hltbData.mainStory;
+      hltbCompletionist = hltbData.completionist;
+      pricePerHour = hltbMainStory ? Math.round(priceJPY / hltbMainStory) : null;
+    }
+  }
+
+  const hltbBonus = pricePerHour ? Math.max(1.0, 20 / pricePerHour) : 1.0;
   const matchCount = favoriteTags.length > 0
     ? tags.filter((t) => favoriteTags.includes(t)).length
     : 0;
@@ -181,13 +202,14 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
 
   let score = 0;
   if (!isFree && !isUnreleased && priceJPY > 0) {
-    score = calculateScore(positiveRate, total, discountPercent, priceJPY) * tagBonus;
+    score = calculateScore(positiveRate, total, discountPercent, priceJPY, hltbBonus) * tagBonus;
   }
 
   return {
     appid, name, headerImage, priceJPY, originalPriceJPY, discountPercent,
     positiveRate, reviewTotal: total, score, isFree, isUnreleased,
-    shortDescription, genres, tags, tagMatchCount: matchCount,
+    shortDescription, genres, hltbMainStory, hltbCompletionist, pricePerHour,
+    tags, tagMatchCount: matchCount,
   };
 }
 
