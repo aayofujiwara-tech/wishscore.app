@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { resolveToSteamId64 } from "@/lib/steamUtils";
 import { getHLTBData } from "@/lib/hltb";
-import { getSteamSpyTags } from "@/lib/steamspy";
+import { getSteamSpyData } from "@/lib/steamspy";
 import type { GameResult } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -183,11 +183,11 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
 
   if (!isFree && !isUnreleased && priceJPY > 0) {
     console.log(`[WishScore] Step2 detail: ${name} (¥${priceJPY})`);
-    const [hltb, fetchedTags] = await Promise.all([
+    const [hltb, spyData] = await Promise.all([
       getHLTBData(name),
-      getSteamSpyTags(appid),
+      getSteamSpyData(appid),
     ]);
-    tags = fetchedTags;
+    tags = spyData.tags;
     if (hltb) {
       hltbMainStory = hltb.mainStory;
       hltbCompletionist = hltb.completionist;
@@ -195,6 +195,11 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
         hltb.mainStory && hltb.mainStory > 0
           ? Math.round(priceJPY / hltb.mainStory)
           : null;
+    } else if (spyData.medianPlaytimeHours && spyData.medianPlaytimeHours > 0) {
+      // Fallback: SteamSpy median playtime when HLTB is unavailable
+      hltbMainStory = spyData.medianPlaytimeHours;
+      pricePerHour = Math.round(priceJPY / spyData.medianPlaytimeHours);
+      console.log(`[WishScore] HLTB fallback (SteamSpy): ${name} → ${spyData.medianPlaytimeHours}h`);
     }
   }
 
