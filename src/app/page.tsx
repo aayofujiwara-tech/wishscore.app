@@ -18,6 +18,7 @@ function rankBadge(rank: number) {
 
 type Weights = { discount: number; review: number; price: number; hltb: number };
 type EnabledWeights = { discount: boolean; review: boolean; price: boolean; hltb: boolean };
+type SortKey = "score" | "discount" | "price" | "review";
 
 function recomputeScore(
   g: GameResult,
@@ -374,6 +375,11 @@ export default function Home() {
   const [cacheAge, setCacheAge] = useState(0);
   const [diffNotice, setDiffNotice] = useState<string | null>(null);
 
+  // Sort + filter state
+  const [sortKey, setSortKey] = useState<SortKey>("score");
+  const [filterSaleOnly, setFilterSaleOnly] = useState(false);
+  const [filterHltbOnly, setFilterHltbOnly] = useState(false);
+
   const eventSourceRef = useRef<EventSource | null>(null);
   const completedRef = useRef(false);
   const loadMoreEsRef = useRef<EventSource | null>(null);
@@ -475,14 +481,31 @@ export default function Home() {
     setTagInput("");
   }
 
-  const rankedGames = useMemo(() => {
+  const scoredGames = useMemo(() => {
     const source = isComplete
       ? games
       : streamingGames.filter((g) => !g.isFree && !g.isUnreleased && g.priceJPY > 0);
-    return [...source]
-      .map((g) => ({ ...g, score: recomputeScore(g, weights, enabledWeights, favoriteTags) }))
-      .sort((a, b) => b.score - a.score);
-  }, [games, streamingGames, isComplete, weights, enabledWeights, favoriteTags]);
+    const scored = [...source].map((g) => ({ ...g, score: recomputeScore(g, weights, enabledWeights, favoriteTags) }));
+    scored.sort((a, b) => {
+      if (!isComplete) return b.score - a.score;
+      switch (sortKey) {
+        case "discount": return b.discountPercent - a.discountPercent;
+        case "price": return a.priceJPY - b.priceJPY;
+        case "review": return b.positiveRate - a.positiveRate;
+        default: return b.score - a.score;
+      }
+    });
+    return scored;
+  }, [games, streamingGames, isComplete, weights, enabledWeights, favoriteTags, sortKey]);
+
+  const rankedGames = useMemo(() => {
+    if (!isComplete) return scoredGames;
+    return scoredGames.filter((g) => {
+      if (filterSaleOnly && g.discountPercent === 0) return false;
+      if (filterHltbOnly && !g.hltbMainStory) return false;
+      return true;
+    });
+  }, [scoredGames, isComplete, filterSaleOnly, filterHltbOnly]);
 
   useEffect(() => {
     setGames((prev) => {
@@ -965,11 +988,77 @@ export default function Home() {
             )}
 
             {/* Ranked games */}
-            {rankedGames.length > 0 && (
+            {(rankedGames.length > 0 || isComplete) && (
               <div className="space-y-2 mb-6">
-                <h2 className="font-rajdhani font-semibold text-[#1b9aff] text-lg tracking-wide mb-3">
+                <h2 className="font-rajdhani font-semibold text-[#1b9aff] text-lg tracking-wide mb-2">
                   コスパランキング{loading ? "（分析中...）" : ""}
                 </h2>
+
+                {/* Sort + filter bar */}
+                {isComplete && (
+                  <>
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                      <span className="text-xs text-[#4a6b7c]">並び替え:</span>
+                      {(
+                        [
+                          { key: "score" as SortKey, label: "コスパ順" },
+                          { key: "discount" as SortKey, label: "割引率順" },
+                          { key: "price" as SortKey, label: "価格が安い順" },
+                          { key: "review" as SortKey, label: "レビュー順" },
+                        ] as { key: SortKey; label: string }[]
+                      ).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          onClick={() => setSortKey(key)}
+                          className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                            sortKey === key
+                              ? "bg-[#1b9aff] text-white"
+                              : "bg-[#2a475e] text-[#8ba3b5] hover:bg-[#1b2f45]"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                      <span className="text-xs text-[#4a6b7c] ml-1">フィルター:</span>
+                      <button
+                        onClick={() => setFilterSaleOnly((v) => !v)}
+                        className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                          filterSaleOnly
+                            ? "bg-[#1b9aff] text-white"
+                            : "bg-[#2a475e] text-[#8ba3b5] hover:bg-[#1b2f45]"
+                        }`}
+                      >
+                        🔥 セール中のみ
+                      </button>
+                      <button
+                        onClick={() => setFilterHltbOnly((v) => !v)}
+                        className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                          filterHltbOnly
+                            ? "bg-[#1b9aff] text-white"
+                            : "bg-[#2a475e] text-[#8ba3b5] hover:bg-[#1b2f45]"
+                        }`}
+                      >
+                        🕐 クリア時間あり
+                      </button>
+                    </div>
+                    {(filterSaleOnly || filterHltbOnly) && (
+                      <p className="text-xs text-[#4a6b7c] mb-2">
+                        {scoredGames.length}件中 {rankedGames.length}件表示
+                        {filterSaleOnly && filterHltbOnly
+                          ? "（セール中・クリア時間あり）"
+                          : filterSaleOnly
+                          ? "（セール中のみ）"
+                          : "（クリア時間あり）"}
+                      </p>
+                    )}
+                    {rankedGames.length === 0 && (filterSaleOnly || filterHltbOnly) && (
+                      <p className="text-center text-sm text-[#8ba3b5] py-6">
+                        条件に一致するゲームがありません
+                      </p>
+                    )}
+                  </>
+                )}
+
                 {rankedGames.map((game, i) => (
                   <GameCard
                     key={game.appid}
