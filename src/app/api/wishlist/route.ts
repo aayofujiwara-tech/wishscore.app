@@ -361,6 +361,12 @@ export async function GET(req: NextRequest): Promise<Response> {
         // Sort all games by base score descending
         allScoredGames.sort((a, b) => b.score - a.score);
 
+        if (allScoredGames.length === 0) {
+          send({ type: "error", error: "ANALYSIS_FAILED" });
+          controller.close();
+          return;
+        }
+
         // Send all scored games to frontend for caching (enables load-more without re-scanning)
         send({ type: "allScores", games: allScoredGames, totalCount });
 
