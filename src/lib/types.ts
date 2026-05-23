@@ -12,7 +12,8 @@ export type GameResult = {
   isUnreleased: boolean;
   shortDescription: string;
   genres: string[];
-  medianPlaytime: number | null;
+  hltbMainStory: number | null;
+  hltbCompletionist: number | null;
   pricePerHour: number | null;
   tags: string[];
   tagMatchCount: number;
