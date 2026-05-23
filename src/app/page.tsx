@@ -308,11 +308,22 @@ function WeightSlider({
   );
 }
 
-const PRESET_TAGS = [
-  "ローグライク", "RPG", "サバイバル", "アクション",
-  "シミュレーション", "パズル", "ホラー", "ADV",
-  "ストラテジー", "スポーツ",
+// SteamSpy returns English tag names; labels shown in UI are Japanese
+const PRESET_TAG_OPTIONS = [
+  { label: "ローグライク", value: "Roguelike" },
+  { label: "RPG",          value: "RPG" },
+  { label: "サバイバル",   value: "Survival" },
+  { label: "アクション",   value: "Action" },
+  { label: "シミュレーション", value: "Simulation" },
+  { label: "パズル",       value: "Puzzle" },
+  { label: "ホラー",       value: "Horror" },
+  { label: "ADV",          value: "Adventure" },
+  { label: "ストラテジー", value: "Strategy" },
+  { label: "スポーツ",     value: "Sports" },
 ];
+const TAG_LABEL_MAP: Record<string, string> = Object.fromEntries(
+  PRESET_TAG_OPTIONS.map(({ label, value }) => [value, label])
+);
 
 type SseData = {
   type: string;
@@ -936,17 +947,17 @@ export default function Home() {
 
                 <p className="text-xs text-[#8ba3b5] mb-2">よく使われるタグ：</p>
                 <div className="flex flex-wrap gap-1.5 mb-3">
-                  {PRESET_TAGS.map((tag) => (
+                  {PRESET_TAG_OPTIONS.map(({ label, value }) => (
                     <button
-                      key={tag}
-                      onClick={() => toggleTag(tag)}
+                      key={value}
+                      onClick={() => toggleTag(value)}
                       className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                        favoriteTags.includes(tag)
+                        favoriteTags.includes(value)
                           ? "bg-[#1b9aff] border-[#1b9aff] text-white"
                           : "border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff]"
                       }`}
                     >
-                      {tag}
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -960,7 +971,7 @@ export default function Home() {
                           key={tag}
                           className="flex items-center gap-1 text-xs bg-[#1b9aff]/20 text-[#1b9aff] border border-[#1b9aff]/40 px-2 py-0.5 rounded-full"
                         >
-                          {tag}
+                          {TAG_LABEL_MAP[tag] ?? tag}
                           <button onClick={() => toggleTag(tag)} className="hover:text-white">×</button>
                         </span>
                       ))}
