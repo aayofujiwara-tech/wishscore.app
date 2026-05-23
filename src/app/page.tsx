@@ -360,7 +360,7 @@ export default function Home() {
             const cached = JSON.parse(cacheStr) as CacheData;
             // Invalidate cache if schema changed (hltbMainStory → medianPlaytime)
             const ageMinutes = Math.round((Date.now() - cached.analyzedAt) / 60000);
-            if (ageMinutes < 60) {
+            if (ageMinutes < 60 && (cached.allScoredGames?.length ?? 0) > 0) {
               setGames(cached.games ?? []);
               setFreeGames(cached.freeGames ?? []);
               setUnreleasedGames(cached.unreleasedGames ?? []);
@@ -509,20 +509,22 @@ export default function Home() {
           setLoading(false);
           localStorage.setItem("wishscore_steamid", steamId.trim());
           setSavedId(steamId.trim());
-          // Save analysis cache for instant display on next visit
-          try {
-            const cacheData: CacheData = {
-              steamId: steamId.trim(),
-              games: data.games ?? [],
-              freeGames: data.freeGames ?? [],
-              unreleasedGames: data.unreleasedGames ?? [],
-              allScoredGames: allScoredGamesRef.current,
-              totalCount: data.totalCount ?? 0,
-              analyzedCount: data.analyzedCount ?? 0,
-              analyzedAt: Date.now(),
-            };
-            localStorage.setItem(`wishscore_cache_${steamId.trim()}`, JSON.stringify(cacheData));
-          } catch { /* quota exceeded — skip cache */ }
+          // Save analysis cache for instant display on next visit (only if we got results)
+          if (allScoredGamesRef.current.length > 0) {
+            try {
+              const cacheData: CacheData = {
+                steamId: steamId.trim(),
+                games: data.games ?? [],
+                freeGames: data.freeGames ?? [],
+                unreleasedGames: data.unreleasedGames ?? [],
+                allScoredGames: allScoredGamesRef.current,
+                totalCount: data.totalCount ?? 0,
+                analyzedCount: data.analyzedCount ?? 0,
+                analyzedAt: Date.now(),
+              };
+              localStorage.setItem(`wishscore_cache_${steamId.trim()}`, JSON.stringify(cacheData));
+            } catch { /* quota exceeded — skip cache */ }
+          }
           es.close();
           eventSourceRef.current = null;
         } else if (data.type === "error") {
@@ -745,7 +747,12 @@ export default function Home() {
                 サーバー設定エラーが発生しました。管理者にお問い合わせください。
               </p>
             )}
-            {!["PRIVATE_WISHLIST", "EMPTY_WISHLIST", "INVALID_STEAMID", "INVALID_API_KEY"].includes(error) && (
+            {error === "ANALYSIS_FAILED" && (
+              <p className="text-red-400">
+                ゲーム情報の取得に失敗しました。Steam APIへのアクセスが一時的にブロックされている可能性があります。しばらく時間をおいて再試行してください。
+              </p>
+            )}
+            {!["PRIVATE_WISHLIST", "EMPTY_WISHLIST", "INVALID_STEAMID", "INVALID_API_KEY", "ANALYSIS_FAILED"].includes(error) && (
               <p className="text-red-400">
                 エラーが発生しました。しばらく時間をおいて再試行してください。
               </p>
