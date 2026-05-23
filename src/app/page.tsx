@@ -16,40 +16,56 @@ function rankBadge(rank: number) {
   return null;
 }
 
+type Weights = { discount: number; review: number; price: number; hltb: number };
+type EnabledWeights = { discount: boolean; review: boolean; price: boolean; hltb: boolean };
+
 function recomputeScore(
   g: GameResult,
-  weights: { discount: number; review: number; price: number },
+  weights: Weights,
+  enabled: EnabledWeights,
   favoriteTags: string[]
 ): number {
   if (g.isFree || g.isUnreleased || g.priceJPY <= 0) return 0;
   const reviewWeight = Math.log10(g.reviewTotal + 1);
-  const discountBoost = Math.pow(1 + g.discountPercent / 100, weights.discount);
-  const priceFactor = Math.pow(g.priceJPY, weights.price);
-  const base = (g.positiveRate * reviewWeight * discountBoost * weights.review / priceFactor) * 1000;
-  const hltbBonus = g.pricePerHour ? Math.max(1.0, 20 / g.pricePerHour) : 1.0;
+  const discountBoost = enabled.discount
+    ? Math.pow(1 + g.discountPercent / 100, 2 * weights.discount)
+    : 1.0;
+  const reviewBoost = enabled.review
+    ? Math.pow(g.positiveRate * reviewWeight, weights.review)
+    : g.positiveRate * reviewWeight;
+  const priceDiv = enabled.price
+    ? Math.pow(g.priceJPY, weights.price)
+    : g.priceJPY;
+  let hltbBonus = 1.0;
+  if (enabled.hltb && g.hltbMainStory) {
+    const pricePerHour = g.priceJPY / g.hltbMainStory;
+    hltbBonus = Math.pow(Math.max(1.0, 20 / pricePerHour), weights.hltb);
+  }
   const matchCount = favoriteTags.length > 0
     ? g.tags.filter((t) => favoriteTags.includes(t)).length
     : 0;
   const tagBonus = Math.min(2.0, 1 + matchCount * 0.2);
-  return base * hltbBonus * tagBonus;
+  return (reviewBoost * discountBoost / priceDiv) * hltbBonus * tagBonus * 1000;
 }
 
 function GameCard({
   game,
   rank,
   weights,
+  enabledWeights,
   favoriteTags,
   steamid,
   style,
 }: {
   game: GameResult;
   rank: number;
-  weights: { discount: number; review: number; price: number };
+  weights: Weights;
+  enabledWeights: EnabledWeights;
   favoriteTags: string[];
   steamid: string;
   style?: React.CSSProperties;
 }) {
-  const score = recomputeScore(game, weights, favoriteTags);
+  const score = recomputeScore(game, weights, enabledWeights, favoriteTags);
   const badge = rankBadge(rank);
   const color = scoreColor(score);
   const matchCount = favoriteTags.length > 0
@@ -241,6 +257,9 @@ function WeightSlider({
   max,
   step,
   onChange,
+  enabled = true,
+  onToggle,
+  note,
 }: {
   label: string;
   value: number;
@@ -248,22 +267,41 @@ function WeightSlider({
   max: number;
   step: number;
   onChange: (v: number) => void;
+  enabled?: boolean;
+  onToggle?: (v: boolean) => void;
+  note?: string;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-xs sm:text-sm text-[#8ba3b5] w-24 sm:w-40 flex-shrink-0">{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="flex-1 accent-[#1b9aff]"
-      />
-      <span className="font-rajdhani text-[#1b9aff] w-10 text-right text-sm">
-        {value.toFixed(1)}x
-      </span>
+    <div>
+      <div className="flex items-center gap-3">
+        {onToggle !== undefined && (
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => onToggle(e.target.checked)}
+            className="w-4 h-4 accent-[#1b9aff] flex-shrink-0 cursor-pointer"
+          />
+        )}
+        <span className={`text-xs sm:text-sm flex-shrink-0 w-24 sm:w-36 ${enabled ? "text-[#8ba3b5]" : "text-[#4a6b7c]"}`}>
+          {label}
+        </span>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={!enabled}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className={`flex-1 accent-[#1b9aff] ${!enabled ? "opacity-30" : ""}`}
+        />
+        <span className={`font-rajdhani w-10 text-right text-sm ${enabled ? "text-[#1b9aff]" : "text-[#4a6b7c]"}`}>
+          {value.toFixed(1)}x
+        </span>
+      </div>
+      {note && (
+        <p className={`text-xs mt-0.5 ml-7 ${enabled ? "text-[#4a6b7c]" : "text-[#2a475e]"}`}>{note}</p>
+      )}
     </div>
   );
 }
@@ -305,7 +343,8 @@ export default function Home() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [weights, setWeights] = useState({ discount: 2.0, review: 1.0, price: 1.0 });
+  const [weights, setWeights] = useState<Weights>({ discount: 2.0, review: 1.0, price: 1.0, hltb: 1.0 });
+  const [enabledWeights, setEnabledWeights] = useState<EnabledWeights>({ discount: true, review: true, price: true, hltb: true });
   const [showWeights, setShowWeights] = useState(false);
   const [favoriteTags, setFavoriteTags] = useState<string[]>([]);
   const [showTagPanel, setShowTagPanel] = useState(false);
@@ -440,9 +479,18 @@ export default function Home() {
       ? games
       : streamingGames.filter((g) => !g.isFree && !g.isUnreleased && g.priceJPY > 0);
     return [...source]
-      .map((g) => ({ ...g, score: recomputeScore(g, weights, favoriteTags) }))
+      .map((g) => ({ ...g, score: recomputeScore(g, weights, enabledWeights, favoriteTags) }))
       .sort((a, b) => b.score - a.score);
-  }, [games, streamingGames, isComplete, weights, favoriteTags]);
+  }, [games, streamingGames, isComplete, weights, enabledWeights, favoriteTags]);
+
+  useEffect(() => {
+    setGames((prev) => {
+      if (prev.length === 0) return prev;
+      return prev
+        .map((g) => ({ ...g, score: recomputeScore(g, weights, enabledWeights, favoriteTags) }))
+        .sort((a, b) => b.score - a.score);
+    });
+  }, [weights, enabledWeights, favoriteTags]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleAnalyze() {
     if (!steamId.trim()) return;
@@ -812,9 +860,35 @@ export default function Home() {
                 <p className="text-xs text-[#8ba3b5] mb-2">
                   スライダーを動かすとリアルタイムに順位が変わります
                 </p>
-                <WeightSlider label="割引率の重み" value={weights.discount} min={1.0} max={3.0} step={0.1} onChange={(v) => setWeights((w) => ({ ...w, discount: v }))} />
-                <WeightSlider label="レビュー件数の重み" value={weights.review} min={0.5} max={2.0} step={0.1} onChange={(v) => setWeights((w) => ({ ...w, review: v }))} />
-                <WeightSlider label="価格の重み" value={weights.price} min={0.5} max={2.0} step={0.1} onChange={(v) => setWeights((w) => ({ ...w, price: v }))} />
+                <WeightSlider
+                  label="割引率の重み"
+                  value={weights.discount} min={0.5} max={3.0} step={0.1}
+                  onChange={(v) => setWeights((w) => ({ ...w, discount: v }))}
+                  enabled={enabledWeights.discount}
+                  onToggle={(v) => setEnabledWeights((e) => ({ ...e, discount: v }))}
+                />
+                <WeightSlider
+                  label="レビュースコアの重み"
+                  value={weights.review} min={0.5} max={2.0} step={0.1}
+                  onChange={(v) => setWeights((w) => ({ ...w, review: v }))}
+                  enabled={enabledWeights.review}
+                  onToggle={(v) => setEnabledWeights((e) => ({ ...e, review: v }))}
+                />
+                <WeightSlider
+                  label="価格の重み"
+                  value={weights.price} min={0.5} max={2.0} step={0.1}
+                  onChange={(v) => setWeights((w) => ({ ...w, price: v }))}
+                  enabled={enabledWeights.price}
+                  onToggle={(v) => setEnabledWeights((e) => ({ ...e, price: v }))}
+                />
+                <WeightSlider
+                  label="クリア時間ボーナス"
+                  value={weights.hltb} min={0.5} max={3.0} step={0.5}
+                  onChange={(v) => setWeights((w) => ({ ...w, hltb: v }))}
+                  enabled={enabledWeights.hltb}
+                  onToggle={(v) => setEnabledWeights((e) => ({ ...e, hltb: v }))}
+                  note="※HLTBデータがある場合のみ適用"
+                />
               </div>
             )}
 
@@ -901,6 +975,7 @@ export default function Home() {
                     game={game}
                     rank={i + 1}
                     weights={weights}
+                    enabledWeights={enabledWeights}
                     favoriteTags={favoriteTags}
                     steamid={steamId}
                     style={{ animationDelay: `${i * 50}ms`, opacity: 0 }}
