@@ -41,7 +41,6 @@ function recomputeScore(
     const pricePerHour = g.priceJPY / g.hltbMainStory;
     // Reference: ¥100/hr = neutral (1.0x); cheaper = bonus (up to 4x); expensive = penalty (min 0.5x)
     hltbBonus = Math.pow(Math.max(0.5, Math.min(4.0, 100 / pricePerHour)), weights.hltb);
-    console.log(`[HLTB] ${g.name}: ¥${Math.round(pricePerHour)}/h → bonus=${hltbBonus.toFixed(2)}x (enabled=${enabled.hltb})`);
   }
   const matchCount = favoriteTags.length > 0
     ? g.tags.filter((t) => favoriteTags.includes(t)).length
