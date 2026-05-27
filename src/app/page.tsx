@@ -246,6 +246,42 @@ function GameCard({
             ))}
           </div>
         )}
+
+        {/* ITAD: sale expiry */}
+        {game.saleExpiry && (() => {
+          const daysLeft = Math.ceil(
+            (new Date(game.saleExpiry).getTime() - Date.now()) / 1000 / 60 / 60 / 24
+          );
+          if (daysLeft < 0) return null;
+          const color =
+            daysLeft <= 3 ? "text-red-400" : daysLeft <= 7 ? "text-orange-400" : "text-slate-400";
+          return (
+            <div className="mt-1">
+              <span className={`text-xs ${color}`}>
+                ⏰ セール終了まであと{daysLeft}日
+              </span>
+              <span className="text-xs text-slate-500 ml-1">
+                ※終了日は目安です。正確な日程はSteamストアでご確認ください
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* ITAD: historical low */}
+        {game.historicalLow != null && (
+          <div className="mt-0.5">
+            {game.priceJPY <= game.historicalLow ? (
+              <span className="text-xs text-green-400">
+                🏆 過去最安値！（¥{game.historicalLow.toLocaleString()}）
+              </span>
+            ) : (
+              <span className="text-xs text-slate-400">
+                📉 過去最安値: ¥{game.historicalLow.toLocaleString()}
+                {game.historicalLowCut != null && `（${game.historicalLowCut}%OFF時）`}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       </a>
     </div>
