@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { resolveToSteamId64 } from "@/lib/steamUtils";
 import { getHLTBData } from "@/lib/hltb";
 import { getSteamSpyTags } from "@/lib/steamspy";
+import { getITADData } from "@/lib/itad";
 import type { GameResult } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -147,6 +148,7 @@ async function processGameFast(appid: number): Promise<GameResult | null> {
     shortDescription, genres,
     hltbMainStory: null, hltbCompletionist: null, pricePerHour: null,
     tags: [], tagMatchCount: 0,
+    saleExpiry: null, historicalLow: null, historicalLowCut: null,
   };
 }
 
@@ -181,16 +183,26 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
   let pricePerHour: number | null = null;
   let tags: string[] = [];
 
+  let saleExpiry: string | null = null;
+  let historicalLow: number | null = null;
+  let historicalLowCut: number | null = null;
+
   if (!isFree && !isUnreleased && priceJPY > 0) {
-    const [hltbData, fetchedTags] = await Promise.all([
+    const [hltbData, fetchedTags, itadData] = await Promise.all([
       getHLTBData(appid),
       getSteamSpyTags(appid),
+      getITADData(appid),
     ]);
     tags = fetchedTags;
     if (hltbData) {
       hltbMainStory = hltbData.mainStory;
       hltbCompletionist = hltbData.completionist;
       pricePerHour = hltbMainStory ? Math.round(priceJPY / hltbMainStory) : null;
+    }
+    if (itadData) {
+      saleExpiry = itadData.saleExpiry;
+      historicalLow = itadData.historicalLow;
+      historicalLowCut = itadData.historicalLowCut;
     }
   }
 
@@ -210,6 +222,7 @@ async function processGame(appid: number, favoriteTags: string[]): Promise<GameR
     positiveRate, reviewTotal: total, score, isFree, isUnreleased,
     shortDescription, genres, hltbMainStory, hltbCompletionist, pricePerHour,
     tags, tagMatchCount: matchCount,
+    saleExpiry, historicalLow, historicalLowCut,
   };
 }
 

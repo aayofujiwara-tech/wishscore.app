@@ -17,6 +17,9 @@ export type GameResult = {
   pricePerHour: number | null;
   tags: string[];
   tagMatchCount: number;
+  saleExpiry: string | null;
+  historicalLow: number | null;
+  historicalLowCut: number | null;
 };
 
 export type ApiResponse = {
