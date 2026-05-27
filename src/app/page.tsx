@@ -73,9 +73,6 @@ function GameCard({
   const matchCount = favoriteTags.length > 0
     ? game.tags.filter((t) => favoriteTags.includes(t)).length
     : 0;
-  const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   function buildShareUrl(): string {
     const origin = window.location.origin;
     const sp = new URLSearchParams({
@@ -99,15 +96,10 @@ function GameCard({
     window.open(tweetUrl, "_blank", "noopener,noreferrer");
   }
 
-  function handleCopy(e: React.MouseEvent) {
+  function handlePreview(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    const shareUrl = buildShareUrl();
-    navigator.clipboard.writeText(shareUrl).then(() => {
-      setCopied(true);
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-      copyTimer.current = setTimeout(() => setCopied(false), 2000);
-    });
+    window.open(buildShareUrl(), "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -158,11 +150,15 @@ function GameCard({
                 𝕏
               </button>
               <button
-                onClick={handleCopy}
-                title="URLをコピー"
-                className="p-2 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] hover:bg-[#1b2f45] transition-colors leading-none text-xs"
+                onClick={handlePreview}
+                title="シェアページをプレビュー"
+                className="p-2 rounded bg-[#1b2838] border border-[#2a475e] text-[#8ba3b5] hover:border-[#1b9aff] hover:text-[#1b9aff] hover:bg-[#1b2f45] transition-colors leading-none"
               >
-                {copied ? "✓" : "📋"}
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15 3 21 3 21 9"/>
+                  <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
               </button>
             </div>
             <div className="flex items-center gap-1">
