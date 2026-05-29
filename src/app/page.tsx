@@ -84,6 +84,15 @@ function GameCard({
       positive: String(Math.round(game.positiveRate * 100)),
       image: game.headerImage,
     });
+    if (game.hltbMainStory != null) sp.set("hltb", String(Math.round(game.hltbMainStory)));
+    if (game.pricePerHour != null) sp.set("pph", String(game.pricePerHour));
+    if (game.saleExpiry) sp.set("expiry", game.saleExpiry);
+    if (game.historicalLow != null) {
+      sp.set("low", String(game.historicalLow));
+      if (game.priceJPY <= game.historicalLow) sp.set("atlow", "1");
+    }
+    const tagsToShare = game.tags.slice(0, 3);
+    if (tagsToShare.length > 0) sp.set("tags", tagsToShare.join(","));
     return `${origin}/share/${encodeURIComponent(steamid)}?${sp.toString()}`;
   }
 
